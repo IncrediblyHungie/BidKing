@@ -17,6 +17,7 @@ from app.models.market_data import (
     LaborRateCache,
     CommonJobTitle,
 )
+from app.models.usage_tracking import UsageTracking
 
 __all__ = [
     "User",
@@ -31,4 +32,5 @@ __all__ = [
     "RecompeteOpportunity",
     "LaborRateCache",
     "CommonJobTitle",
+    "UsageTracking",
 ]
