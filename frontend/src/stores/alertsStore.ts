@@ -21,7 +21,17 @@ interface AlertsState {
   updateAlertProfile: (id: string, data: Partial<AlertProfileCreate>) => Promise<void>;
   deleteAlertProfile: (id: string) => Promise<void>;
   toggleProfileActive: (id: string) => Promise<void>;
-  testAlertProfile: (id: string) => Promise<{ matches: number; sample_opportunities: any[] }>;
+  testAlertProfile: (id: string) => Promise<{
+    profile_name: string;
+    match_count: number;
+    sample_matches: {
+      id: string;
+      title: string;
+      agency: string;
+      score: number;
+      deadline: string | null;
+    }[];
+  }>;
   clearError: () => void;
 }
 

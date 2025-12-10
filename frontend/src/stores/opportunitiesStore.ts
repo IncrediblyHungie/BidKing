@@ -97,7 +97,7 @@ export const useOpportunitiesStore = create<OpportunitiesState>()((set, get) => 
   fetchSavedOpportunities: async () => {
     set({ isLoading: true, error: null });
     try {
-      const saved = await opportunitiesApi.getSaved();
+      const saved = await opportunitiesApi.listSaved();
       set({ savedOpportunities: saved, isLoading: false });
     } catch (error: any) {
       set({
@@ -109,7 +109,7 @@ export const useOpportunitiesStore = create<OpportunitiesState>()((set, get) => 
 
   saveOpportunity: async (id: string, notes?: string) => {
     try {
-      await opportunitiesApi.save(id, notes);
+      await opportunitiesApi.save({ opportunity_id: id, notes });
       // Refresh saved list
       await get().fetchSavedOpportunities();
     } catch (error: any) {
