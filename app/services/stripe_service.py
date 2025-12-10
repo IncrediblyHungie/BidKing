@@ -22,10 +22,10 @@ stripe.api_key = settings.stripe_secret_key
 
 # Price IDs for each tier (set these in Stripe Dashboard)
 STRIPE_PRICE_IDS = {
-    "starter_monthly": settings.stripe_starter_monthly_price_id,
-    "starter_yearly": settings.stripe_starter_yearly_price_id,
-    "pro_monthly": settings.stripe_pro_monthly_price_id,
-    "pro_yearly": settings.stripe_pro_yearly_price_id,
+    "starter_monthly": settings.stripe_price_starter_monthly or "",
+    "starter_yearly": settings.stripe_price_starter_yearly or "",
+    "pro_monthly": settings.stripe_price_pro_monthly or "",
+    "pro_yearly": settings.stripe_price_pro_yearly or "",
 }
 
 
