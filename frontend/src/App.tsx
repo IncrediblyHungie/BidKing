@@ -1,6 +1,9 @@
 import { BrowserRouter as Router, Routes, Route } from "react-router";
 import { Toaster } from "react-hot-toast";
 
+// Landing page
+import LandingPage from "./pages/Landing/LandingPage";
+
 // Auth pages
 import SignIn from "./pages/AuthPages/SignIn";
 import SignUp from "./pages/AuthPages/SignUp";
@@ -34,10 +37,12 @@ export default function App() {
       <Router>
         <ScrollToTop />
         <Routes>
+          {/* Public Landing Page */}
+          <Route path="/" element={<LandingPage />} />
+
           {/* Dashboard Layout */}
           <Route element={<AppLayout />}>
             {/* Main Dashboard */}
-            <Route index path="/" element={<Home />} />
             <Route path="/dashboard" element={<Home />} />
 
             {/* Opportunities */}
