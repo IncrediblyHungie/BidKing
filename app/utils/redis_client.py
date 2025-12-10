@@ -2,6 +2,7 @@
 Redis client utilities for caching and rate limiting.
 
 Provides helper classes for common Redis operations.
+Falls back to no-op implementations if Redis is not available.
 """
 
 import json
@@ -9,19 +10,38 @@ from datetime import timedelta
 from typing import Optional, Any, Callable
 from functools import wraps
 import hashlib
-
-import redis
+import logging
 
 from app.config import settings
 
+logger = logging.getLogger(__name__)
 
-# Global Redis client
-redis_client = redis.from_url(
-    settings.redis_url,
-    decode_responses=True,
-    socket_connect_timeout=5,
-    socket_timeout=5,
-)
+# Try to initialize Redis client
+redis_client = None
+REDIS_AVAILABLE = False
+
+try:
+    if settings.redis_url and settings.redis_url.startswith(('redis://', 'rediss://')):
+        import redis
+        redis_client = redis.from_url(
+            settings.redis_url,
+            decode_responses=True,
+            socket_connect_timeout=5,
+            socket_timeout=5,
+        )
+        # Test connection
+        redis_client.ping()
+        REDIS_AVAILABLE = True
+        logger.info("Redis connected successfully")
+except Exception as e:
+    logger.warning(f"Redis not available, using in-memory fallback: {e}")
+    REDIS_AVAILABLE = False
+    redis_client = None
+
+
+# In-memory fallback storage
+_memory_cache: dict = {}
+_memory_sets: dict = {}
 
 
 class RateLimiter:
@@ -29,6 +49,7 @@ class RateLimiter:
     Token bucket rate limiter using Redis.
 
     Used to enforce API rate limits per user/tier.
+    Falls back to allowing all requests if Redis unavailable.
     """
 
     def __init__(
@@ -54,18 +75,19 @@ class RateLimiter:
     ) -> tuple[bool, dict]:
         """
         Check if request is allowed under rate limit.
-
-        Args:
-            identifier: User ID or API key
-            resource: Resource being accessed (e.g., 'api', 'alerts')
-            limit: Max requests allowed in window
-            window: Time window in seconds
-
-        Returns:
-            Tuple of (is_allowed, rate_limit_info)
         """
         limit = limit or self.default_limit
         window = window or self.default_window
+
+        if not REDIS_AVAILABLE:
+            # Allow all requests when Redis unavailable
+            return True, {
+                "limit": limit,
+                "remaining": limit,
+                "reset_in": window,
+                "current": 0,
+            }
+
         key = self._get_key(identifier, resource)
 
         pipe = redis_client.pipeline()
@@ -93,12 +115,16 @@ class RateLimiter:
 
     def get_usage(self, identifier: str, resource: str = "default") -> int:
         """Get current usage count for identifier."""
+        if not REDIS_AVAILABLE:
+            return 0
         key = self._get_key(identifier, resource)
         count = redis_client.get(key)
         return int(count) if count else 0
 
     def reset(self, identifier: str, resource: str = "default") -> None:
         """Reset rate limit for identifier."""
+        if not REDIS_AVAILABLE:
+            return
         key = self._get_key(identifier, resource)
         redis_client.delete(key)
 
@@ -106,8 +132,7 @@ class RateLimiter:
 class Cache:
     """
     Redis-based cache with TTL support.
-
-    Used for caching API responses, opportunity data, etc.
+    Falls back to simple dict if Redis unavailable.
     """
 
     def __init__(self, key_prefix: str = "cache", default_ttl: int = 3600):
@@ -119,16 +144,12 @@ class Cache:
         return f"{self.key_prefix}:{key}"
 
     def get(self, key: str) -> Optional[Any]:
-        """
-        Get cached value.
-
-        Args:
-            key: Cache key
-
-        Returns:
-            Cached value or None if not found/expired
-        """
+        """Get cached value."""
         redis_key = self._get_key(key)
+
+        if not REDIS_AVAILABLE:
+            return _memory_cache.get(redis_key)
+
         data = redis_client.get(redis_key)
 
         if data is None:
@@ -145,16 +166,13 @@ class Cache:
         value: Any,
         ttl: Optional[int] = None,
     ) -> None:
-        """
-        Set cached value with TTL.
-
-        Args:
-            key: Cache key
-            value: Value to cache (will be JSON serialized)
-            ttl: Time to live in seconds
-        """
+        """Set cached value with TTL."""
         redis_key = self._get_key(key)
         ttl = ttl or self.default_ttl
+
+        if not REDIS_AVAILABLE:
+            _memory_cache[redis_key] = value
+            return
 
         if isinstance(value, (dict, list)):
             data = json.dumps(value)
@@ -166,11 +184,16 @@ class Cache:
     def delete(self, key: str) -> None:
         """Delete cached value."""
         redis_key = self._get_key(key)
+        if not REDIS_AVAILABLE:
+            _memory_cache.pop(redis_key, None)
+            return
         redis_client.delete(redis_key)
 
     def exists(self, key: str) -> bool:
         """Check if key exists in cache."""
         redis_key = self._get_key(key)
+        if not REDIS_AVAILABLE:
+            return redis_key in _memory_cache
         return redis_client.exists(redis_key) > 0
 
     def get_or_set(
@@ -179,17 +202,7 @@ class Cache:
         factory: Callable[[], Any],
         ttl: Optional[int] = None,
     ) -> Any:
-        """
-        Get cached value or compute and cache it.
-
-        Args:
-            key: Cache key
-            factory: Function to generate value if not cached
-            ttl: Time to live in seconds
-
-        Returns:
-            Cached or newly computed value
-        """
+        """Get cached value or compute and cache it."""
         value = self.get(key)
         if value is not None:
             return value
@@ -204,19 +217,7 @@ def cached(
     ttl: int = 3600,
     key_builder: Optional[Callable[..., str]] = None,
 ):
-    """
-    Decorator for caching function results.
-
-    Args:
-        key_prefix: Prefix for cache keys
-        ttl: Time to live in seconds
-        key_builder: Optional function to build cache key from args
-
-    Usage:
-        @cached("opportunities", ttl=300)
-        def get_opportunities(naics_code: str):
-            ...
-    """
+    """Decorator for caching function results."""
     cache = Cache(key_prefix=key_prefix, default_ttl=ttl)
 
     def decorator(func: Callable):
@@ -245,13 +246,8 @@ def cached(
     return decorator
 
 
-# Deduplication utilities
 class Deduplicator:
-    """
-    Deduplication using Redis sets.
-
-    Tracks which items have been processed to avoid duplicates.
-    """
+    """Deduplication using Redis sets or in-memory fallback."""
 
     def __init__(self, key_prefix: str = "dedup", ttl: int = 86400):
         self.key_prefix = key_prefix
@@ -262,28 +258,20 @@ class Deduplicator:
         return f"{self.key_prefix}:{namespace}"
 
     def is_duplicate(self, namespace: str, item_id: str) -> bool:
-        """
-        Check if item has been processed.
-
-        Args:
-            namespace: Category of items (e.g., 'alerts', 'opportunities')
-            item_id: Unique identifier for item
-
-        Returns:
-            True if item was already processed
-        """
+        """Check if item has been processed."""
         key = self._get_key(namespace)
+        if not REDIS_AVAILABLE:
+            return item_id in _memory_sets.get(key, set())
         return redis_client.sismember(key, item_id)
 
     def mark_processed(self, namespace: str, item_id: str) -> None:
-        """
-        Mark item as processed.
-
-        Args:
-            namespace: Category of items
-            item_id: Unique identifier for item
-        """
+        """Mark item as processed."""
         key = self._get_key(namespace)
+        if not REDIS_AVAILABLE:
+            if key not in _memory_sets:
+                _memory_sets[key] = set()
+            _memory_sets[key].add(item_id)
+            return
         pipe = redis_client.pipeline()
         pipe.sadd(key, item_id)
         pipe.expire(key, self.ttl)
@@ -295,6 +283,11 @@ class Deduplicator:
             return
 
         key = self._get_key(namespace)
+        if not REDIS_AVAILABLE:
+            if key not in _memory_sets:
+                _memory_sets[key] = set()
+            _memory_sets[key].update(item_ids)
+            return
         pipe = redis_client.pipeline()
         pipe.sadd(key, *item_ids)
         pipe.expire(key, self.ttl)
@@ -303,6 +296,9 @@ class Deduplicator:
     def clear(self, namespace: str) -> None:
         """Clear all processed items in namespace."""
         key = self._get_key(namespace)
+        if not REDIS_AVAILABLE:
+            _memory_sets.pop(key, None)
+            return
         redis_client.delete(key)
 
 
