@@ -274,7 +274,7 @@ def _can_send_alert(db, user: User) -> bool:
     month_start = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     usage = db.query(UsageTracking).filter(
         UsageTracking.user_id == user.id,
-        UsageTracking.period_start >= month_start,
+        UsageTracking.month >= month_start,
     ).first()
 
     if not usage:
@@ -286,11 +286,10 @@ def _can_send_alert(db, user: User) -> bool:
 def _track_alert_usage(db, user_id: UUID):
     """Track alert usage for a user."""
     month_start = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    month_end = (month_start + timedelta(days=32)).replace(day=1) - timedelta(seconds=1)
 
     usage = db.query(UsageTracking).filter(
         UsageTracking.user_id == user_id,
-        UsageTracking.period_start == month_start,
+        UsageTracking.month == month_start,
     ).first()
 
     if usage:
@@ -298,8 +297,7 @@ def _track_alert_usage(db, user_id: UUID):
     else:
         usage = UsageTracking(
             user_id=user_id,
-            period_start=month_start,
-            period_end=month_end,
+            month=month_start,
             alerts_sent=1,
         )
         db.add(usage)
