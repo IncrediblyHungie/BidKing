@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router";
 import { Toaster } from "react-hot-toast";
 
@@ -7,6 +8,7 @@ import LandingPage from "./pages/Landing/LandingPage";
 // Auth pages
 import SignIn from "./pages/AuthPages/SignIn";
 import SignUp from "./pages/AuthPages/SignUp";
+import OnboardingPage from "./pages/Onboarding/OnboardingPage";
 
 // Dashboard pages
 import Home from "./pages/Dashboard/Home";
@@ -31,7 +33,16 @@ import BarChart from "./pages/Charts/BarChart";
 import AppLayout from "./layout/AppLayout";
 import { ScrollToTop } from "./components/common/ScrollToTop";
 
+// Auth store
+import { useAuthStore } from "./stores/authStore";
+
 export default function App() {
+  const initialize = useAuthStore((state) => state.initialize);
+
+  // Initialize Supabase auth on app mount
+  useEffect(() => {
+    initialize();
+  }, [initialize]);
   return (
     <>
       <Router>
@@ -69,6 +80,7 @@ export default function App() {
           {/* Auth Layout */}
           <Route path="/signin" element={<SignIn />} />
           <Route path="/signup" element={<SignUp />} />
+          <Route path="/onboarding" element={<OnboardingPage />} />
 
           {/* Fallback Route */}
           <Route path="*" element={<NotFound />} />

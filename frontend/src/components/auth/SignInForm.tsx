@@ -14,7 +14,7 @@ export default function SignInForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  const { login, isLoading, error } = useAuthStore();
+  const { login, isLoading, error, isAuthenticated } = useAuthStore();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -30,9 +30,14 @@ export default function SignInForm() {
       toast.success("Welcome back!");
       navigate("/dashboard");
     } catch (err: any) {
-      toast.error(err.response?.data?.detail || "Login failed");
+      toast.error(err.message || "Login failed");
     }
   };
+
+  // If already authenticated, redirect to dashboard
+  if (isAuthenticated) {
+    navigate("/dashboard");
+  }
 
   return (
     <div className="flex flex-col flex-1">
@@ -114,7 +119,7 @@ export default function SignInForm() {
                   </div>
                 )}
                 <div>
-                  <Button className="w-full" size="sm" disabled={isLoading}>
+                  <Button className="w-full" size="sm" type="submit" disabled={isLoading}>
                     {isLoading ? "Signing in..." : "Sign in"}
                   </Button>
                 </div>

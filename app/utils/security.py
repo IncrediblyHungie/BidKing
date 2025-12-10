@@ -23,13 +23,23 @@ REFRESH_TOKEN_EXPIRE_DAYS = 7
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against its hash."""
-    return pwd_context.verify(plain_password, hashed_password)
+    """Verify a password against its hash.
+
+    Note: bcrypt has a 72-byte limit on passwords, so we truncate to ensure compatibility.
+    """
+    # Truncate to 72 bytes to match hashing behavior
+    password_bytes = plain_password.encode('utf-8')[:72].decode('utf-8', errors='ignore')
+    return pwd_context.verify(password_bytes, hashed_password)
 
 
 def get_password_hash(password: str) -> str:
-    """Generate a password hash."""
-    return pwd_context.hash(password)
+    """Generate a password hash.
+
+    Note: bcrypt has a 72-byte limit on passwords, so we truncate to ensure compatibility.
+    """
+    # Truncate to 72 bytes to avoid bcrypt limitation
+    password_bytes = password.encode('utf-8')[:72].decode('utf-8', errors='ignore')
+    return pwd_context.hash(password_bytes)
 
 
 def create_access_token(

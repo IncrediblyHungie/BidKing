@@ -7,10 +7,10 @@ Federal contract opportunities from SAM.gov.
 import uuid
 from datetime import datetime
 from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Integer, Text, Numeric, Date
-from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB
 from sqlalchemy.orm import relationship
 
 from app.database import Base
+from app.utils.uuid_type import GUID, JSONArray, JSONDict
 
 
 class Opportunity(Base):
@@ -19,7 +19,7 @@ class Opportunity(Base):
     __tablename__ = "opportunities"
 
     # Primary key
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
 
     # SAM.gov identifiers
     notice_id = Column(String(100), unique=True, nullable=False, index=True)
@@ -99,7 +99,7 @@ class Opportunity(Base):
     likelihood_score = Column(Integer, default=50, index=True)
 
     # Reasons for the score
-    score_reasons = Column(ARRAY(Text), nullable=True)
+    score_reasons = Column(JSONArray(), nullable=True)
 
     # ==========================================================================
     # Links
@@ -119,7 +119,7 @@ class Opportunity(Base):
     # ==========================================================================
 
     # Store full JSON for future flexibility
-    raw_data = Column(JSONB, nullable=True)
+    raw_data = Column(JSONDict(), nullable=True)
 
     # ==========================================================================
     # Timestamps
@@ -163,10 +163,10 @@ class PointOfContact(Base):
     __tablename__ = "points_of_contact"
 
     # Primary key
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
 
     # Opportunity relationship
-    opportunity_id = Column(UUID(as_uuid=True), ForeignKey("opportunities.id", ondelete="CASCADE"), nullable=False, index=True)
+    opportunity_id = Column(GUID(), ForeignKey("opportunities.id", ondelete="CASCADE"), nullable=False, index=True)
 
     # Contact info
     contact_type = Column(String(50), nullable=True)  # primary, secondary
@@ -192,11 +192,11 @@ class SavedOpportunity(Base):
     __tablename__ = "saved_opportunities"
 
     # Primary key
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
 
     # Relationships
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    opportunity_id = Column(UUID(as_uuid=True), ForeignKey("opportunities.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    opportunity_id = Column(GUID(), ForeignKey("opportunities.id", ondelete="CASCADE"), nullable=False, index=True)
 
     # Tracking status
     status = Column(String(50), default="saved")

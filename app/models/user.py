@@ -7,8 +7,8 @@ Core user account model with authentication fields.
 import uuid
 from datetime import datetime
 from sqlalchemy import Column, String, Boolean, DateTime, Text
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
+from app.utils.uuid_type import GUID
 
 from app.database import Base
 
@@ -19,7 +19,7 @@ class User(Base):
     __tablename__ = "users"
 
     # Primary key
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
 
     # Authentication
     email = Column(String(255), unique=True, nullable=False, index=True)

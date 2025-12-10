@@ -7,10 +7,10 @@ User-configured alert criteria for opportunity matching.
 import uuid
 from datetime import datetime
 from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Integer, Text, Numeric
-from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
 
 from app.database import Base
+from app.utils.uuid_type import GUID, JSONArray
 
 
 class AlertProfile(Base):
@@ -19,10 +19,10 @@ class AlertProfile(Base):
     __tablename__ = "alert_profiles"
 
     # Primary key
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
 
     # User relationship
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
 
     # Profile info
     name = Column(String(255), nullable=False)
@@ -34,36 +34,36 @@ class AlertProfile(Base):
     # ==========================================================================
 
     # NAICS codes (e.g., ['541511', '541512'])
-    naics_codes = Column(ARRAY(String(6)), nullable=True)
+    naics_codes = Column(JSONArray(), nullable=True)
 
     # PSC codes (Product Service Codes)
-    psc_codes = Column(ARRAY(String(10)), nullable=True)
+    psc_codes = Column(JSONArray(), nullable=True)
 
     # Keywords to match in title/description
-    keywords = Column(ARRAY(Text), nullable=True)
+    keywords = Column(JSONArray(), nullable=True)
 
     # Keywords to exclude
-    excluded_keywords = Column(ARRAY(Text), nullable=True)
+    excluded_keywords = Column(JSONArray(), nullable=True)
 
     # ==========================================================================
     # Geographic Filters
     # ==========================================================================
 
     # State codes (e.g., ['CA', 'TX', 'NY'])
-    states = Column(ARRAY(String(2)), nullable=True)
+    states = Column(JSONArray(), nullable=True)
 
     # Country codes (default USA)
-    countries = Column(ARRAY(String(3)), nullable=True, default=["USA"])
+    countries = Column(JSONArray(), nullable=True)
 
     # ==========================================================================
     # Contract Type Filters
     # ==========================================================================
 
     # Set-aside types (e.g., ['SBA', 'WOSB', '8(a)'])
-    set_aside_types = Column(ARRAY(String(50)), nullable=True)
+    set_aside_types = Column(JSONArray(), nullable=True)
 
     # Notice types (e.g., ['Solicitation', 'Sources Sought', 'Award Notice'])
-    notice_types = Column(ARRAY(String(50)), nullable=True)
+    notice_types = Column(JSONArray(), nullable=True)
 
     # Minimum likelihood score (0-100)
     min_score = Column(Integer, default=0)
@@ -83,10 +83,10 @@ class AlertProfile(Base):
     # ==========================================================================
 
     # Specific agencies to include
-    agencies = Column(ARRAY(String(255)), nullable=True)
+    agencies = Column(JSONArray(), nullable=True)
 
     # Agencies to exclude
-    excluded_agencies = Column(ARRAY(String(255)), nullable=True)
+    excluded_agencies = Column(JSONArray(), nullable=True)
 
     # ==========================================================================
     # Delivery Preferences

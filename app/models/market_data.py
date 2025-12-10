@@ -7,9 +7,9 @@ USAspending awards, NAICS statistics, labor rates, and competitor data.
 import uuid
 from datetime import datetime
 from sqlalchemy import Column, String, Boolean, DateTime, Integer, Text, Numeric, Date
-from sqlalchemy.dialects.postgresql import UUID, ARRAY, JSONB
 
 from app.database import Base
+from app.utils.uuid_type import GUID, JSONArray, JSONDict
 
 
 class ContractAward(Base):
@@ -18,7 +18,7 @@ class ContractAward(Base):
     __tablename__ = "contract_awards"
 
     # Primary key
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
 
     # Award identification
     award_id = Column(String(100), unique=True, nullable=False, index=True)
@@ -64,7 +64,7 @@ class ContractAward(Base):
     recipient_country = Column(String(3), nullable=True)
 
     # Business characteristics
-    business_types = Column(ARRAY(String(50)), nullable=True)
+    business_types = Column(JSONArray(), nullable=True)
 
     # Place of performance
     pop_city = Column(String(100), nullable=True)
@@ -83,7 +83,7 @@ class ContractAward(Base):
     fetched_at = Column(DateTime, default=datetime.utcnow)
 
     # Raw data
-    raw_data = Column(JSONB, nullable=True)
+    raw_data = Column(JSONDict(), nullable=True)
 
     def __repr__(self):
         return f"<ContractAward {self.award_id}>"
@@ -95,7 +95,7 @@ class NAICSStatistics(Base):
     __tablename__ = "naics_statistics"
 
     # Primary key
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
 
     # NAICS identification
     naics_code = Column(String(6), unique=True, nullable=False, index=True)
@@ -125,8 +125,8 @@ class NAICSStatistics(Base):
     sole_source_percentage = Column(Numeric(5, 2), default=0)
 
     # Top data (JSON arrays)
-    top_agencies = Column(JSONB, nullable=True)
-    top_recipients = Column(JSONB, nullable=True)
+    top_agencies = Column(JSONDict(), nullable=True)
+    top_recipients = Column(JSONDict(), nullable=True)
 
     # Recompete pipeline
     contracts_expiring_90_days = Column(Integer, default=0)
@@ -146,7 +146,7 @@ class Recipient(Base):
     __tablename__ = "recipients"
 
     # Primary key
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
 
     # Identification
     uei = Column(String(12), unique=True, nullable=False, index=True)
@@ -163,7 +163,7 @@ class Recipient(Base):
     country = Column(String(3), default="USA")
 
     # Business types
-    business_types = Column(ARRAY(String(50)), nullable=True)
+    business_types = Column(JSONArray(), nullable=True)
     is_small_business = Column(Boolean, default=False)
 
     # Award statistics
@@ -173,10 +173,10 @@ class Recipient(Base):
     last_award_date = Column(Date, nullable=True)
 
     # NAICS expertise
-    primary_naics_codes = Column(ARRAY(String(6)), nullable=True)
+    primary_naics_codes = Column(JSONArray(), nullable=True)
 
     # Top agencies
-    top_agencies = Column(JSONB, nullable=True)
+    top_agencies = Column(JSONDict(), nullable=True)
 
     # Metadata
     last_updated = Column(DateTime, default=datetime.utcnow)
@@ -191,7 +191,7 @@ class RecompeteOpportunity(Base):
     __tablename__ = "recompete_opportunities"
 
     # Primary key
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
 
     # Source award reference
     award_id = Column(String(100), nullable=False, index=True)
@@ -216,8 +216,8 @@ class RecompeteOpportunity(Base):
     # Link to SAM.gov opportunity when posted
     linked_opportunity_id = Column(String(100), nullable=True)
 
-    # User tracking
-    watching_users = Column(ARRAY(UUID(as_uuid=True)), nullable=True)
+    # User tracking (stored as JSON array of UUID strings)
+    watching_users = Column(JSONArray(), nullable=True)
 
     # Metadata
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -233,7 +233,7 @@ class LaborRateCache(Base):
     __tablename__ = "labor_rate_cache"
 
     # Primary key
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
 
     # Search key
     search_query = Column(String(255), nullable=False, index=True)
@@ -251,7 +251,7 @@ class LaborRateCache(Base):
     percentile_75 = Column(Numeric(8, 2), nullable=True)
 
     # Sample data
-    sample_categories = Column(JSONB, nullable=True)
+    sample_categories = Column(JSONDict(), nullable=True)
 
     # Cache metadata
     cached_at = Column(DateTime, default=datetime.utcnow)
@@ -267,13 +267,13 @@ class CommonJobTitle(Base):
     __tablename__ = "common_job_titles"
 
     # Primary key
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
 
     # User-friendly title
     display_title = Column(String(255), nullable=False, unique=True)
 
-    # CALC search variations
-    calc_search_terms = Column(ARRAY(Text), nullable=False)
+    # CALC search variations (stored as JSON array of strings)
+    calc_search_terms = Column(JSONArray(), nullable=False)
 
     # Category
     category = Column(String(50), nullable=True)

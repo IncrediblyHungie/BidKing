@@ -25,6 +25,18 @@ async def lifespan(app: FastAPI):
     # Startup
     print("BidKing API starting up...")
 
+    # Create database tables
+    from app.database import engine, Base
+    from app.models import (
+        User, Subscription, UsageTracking, AlertProfile,
+        Opportunity, PointOfContact, SavedOpportunity, AlertSent,
+        ContractAward, NAICSStatistics, Recipient, RecompeteOpportunity,
+        LaborRateCache, CommonJobTitle
+    )
+    print("Creating database tables...")
+    Base.metadata.create_all(bind=engine)
+    print("Database tables created successfully!")
+
     yield
 
     # Shutdown

@@ -7,10 +7,10 @@ Tracking of alerts sent to users.
 import uuid
 from datetime import datetime
 from sqlalchemy import Column, String, DateTime, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from app.database import Base
+from app.utils.uuid_type import GUID
 
 
 class AlertSent(Base):
@@ -19,12 +19,12 @@ class AlertSent(Base):
     __tablename__ = "alerts_sent"
 
     # Primary key
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
 
     # Relationships
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    alert_profile_id = Column(UUID(as_uuid=True), ForeignKey("alert_profiles.id", ondelete="CASCADE"), nullable=True, index=True)
-    opportunity_id = Column(UUID(as_uuid=True), ForeignKey("opportunities.id", ondelete="SET NULL"), nullable=True, index=True)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    alert_profile_id = Column(GUID(), ForeignKey("alert_profiles.id", ondelete="CASCADE"), nullable=True, index=True)
+    opportunity_id = Column(GUID(), ForeignKey("opportunities.id", ondelete="SET NULL"), nullable=True, index=True)
 
     # Delivery details
     delivery_method = Column(String(20), nullable=False)  # email, sms, in_app

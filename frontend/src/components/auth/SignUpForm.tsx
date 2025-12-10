@@ -16,7 +16,7 @@ export default function SignUpForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  const { register, isLoading, error } = useAuthStore();
+  const { register, isLoading, error, isAuthenticated } = useAuthStore();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -41,15 +41,20 @@ export default function SignUpForm() {
       await register({
         email,
         password,
-        first_name: firstName,
-        last_name: lastName,
+        company_name: `${firstName} ${lastName}`,
       });
-      toast.success("Account created! Please check your email to verify.");
-      navigate("/signin");
+      toast.success("Account created! Let's set up your profile.");
+      // Navigate to onboarding on successful registration
+      navigate("/onboarding");
     } catch (err: any) {
-      toast.error(err.response?.data?.detail || "Registration failed");
+      toast.error(err.message || "Registration failed");
     }
   };
+
+  // If already authenticated, redirect to dashboard
+  if (isAuthenticated) {
+    navigate("/dashboard");
+  }
 
   return (
     <div className="flex flex-col flex-1 w-full overflow-y-auto lg:w-1/2 no-scrollbar">
@@ -166,7 +171,7 @@ export default function SignUpForm() {
                   </div>
                 )}
                 <div>
-                  <Button className="w-full" size="sm" disabled={isLoading}>
+                  <Button className="w-full" size="sm" type="submit" disabled={isLoading}>
                     {isLoading ? "Creating account..." : "Create Account"}
                   </Button>
                 </div>

@@ -7,10 +7,10 @@ Stripe subscription tracking.
 import uuid
 from datetime import datetime
 from sqlalchemy import Column, String, DateTime, ForeignKey, Integer
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from app.database import Base
+from app.utils.uuid_type import GUID
 
 
 class Subscription(Base):
@@ -19,10 +19,10 @@ class Subscription(Base):
     __tablename__ = "subscriptions"
 
     # Primary key
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
 
     # User relationship
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
 
     # Stripe IDs
     stripe_subscription_id = Column(String(255), unique=True, nullable=True, index=True)
@@ -73,10 +73,10 @@ class UsageTracking(Base):
     __tablename__ = "usage_tracking"
 
     # Primary key
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
 
     # User relationship
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
 
     # Period (first of month)
     month = Column(DateTime, nullable=False)
