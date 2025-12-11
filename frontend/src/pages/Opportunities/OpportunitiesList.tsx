@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router";
-import { useOpportunitiesStore } from "../../stores/opportunitiesStore";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
 import Input from "../../components/form/input/InputField";
 import Label from "../../components/form/Label";
 import Button from "../../components/ui/button/Button";
 import SearchableSelect from "../../components/form/SearchableSelect";
+import { Opportunity } from "../../types";
 
 interface FilterStats {
   total_active: number;
@@ -105,21 +105,15 @@ function SortableHeader({
 }
 
 export default function OpportunitiesList() {
-  const {
-    opportunities,
-    isLoading,
-    error,
-    total,
-    page,
-    pageSize,
-    filters,
-    fetchOpportunities,
-    setFilters,
-    setPage,
-    clearFilters,
-  } = useOpportunitiesStore();
+  // Use direct fetch instead of Zustand store (same pattern as Recompetes)
+  const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(20);
 
-  const [searchInput, setSearchInput] = useState(filters.keywords || "");
+  const [searchInput, setSearchInput] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [filterStats, setFilterStats] = useState<FilterStats | null>(null);
   const [naicsFilter, setNaicsFilter] = useState("");
@@ -127,19 +121,55 @@ export default function OpportunitiesList() {
   const [setAsideFilter, setSetAsideFilter] = useState("");
   const [stateFilter, setStateFilter] = useState("");
 
-  // Get current sort from filters
-  const currentSort = filters.sort_by || "response_deadline";
-  const currentOrder = filters.sort_order || "asc";
+  // Sort state
+  const [currentSort, setCurrentSort] = useState("response_deadline");
+  const [currentOrder, setCurrentOrder] = useState("asc");
+
+  // Fetch opportunities using direct fetch (like Recompetes)
+  const fetchOpportunities = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams();
+      params.append("page", page.toString());
+      params.append("page_size", pageSize.toString());
+      params.append("sort_by", currentSort);
+      params.append("sort_order", currentOrder);
+
+      if (searchInput) params.append("query", searchInput);
+      if (naicsFilter) params.append("naics_codes", naicsFilter);
+      if (stateFilter) params.append("states", stateFilter);
+      if (setAsideFilter) params.append("set_aside_types", setAsideFilter);
+
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL || "https://bidking-api.fly.dev/api/v1"}/opportunities?${params}`
+      );
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setOpportunities(data.items || []);
+      setTotal(data.total || 0);
+    } catch (err) {
+      console.error("Error fetching opportunities:", err);
+      setError(err instanceof Error ? err.message : "Failed to fetch opportunities");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [page, pageSize, currentSort, currentOrder, searchInput, naicsFilter, stateFilter, setAsideFilter]);
 
   useEffect(() => {
     fetchOpportunities();
     fetchFilterStats();
-  }, [page, filters]);
+  }, [fetchOpportunities]);
 
   // Handle column sort
   const handleColumnSort = (column: string) => {
     const newOrder = currentSort === column && currentOrder === "asc" ? "desc" : "asc";
-    setFilters({ sort_by: column, sort_order: newOrder });
+    setCurrentSort(column);
+    setCurrentOrder(newOrder);
   };
 
   const fetchFilterStats = async () => {
@@ -158,12 +188,8 @@ export default function OpportunitiesList() {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    const newFilters: Record<string, unknown> = { keywords: searchInput };
-    if (naicsFilter) newFilters.naics_codes = [naicsFilter];
-    if (agencyFilter) newFilters.agencies = [agencyFilter];
-    if (setAsideFilter) newFilters.set_aside = setAsideFilter;
-    if (stateFilter) newFilters.state = stateFilter;
-    setFilters(newFilters);
+    setPage(1); // Reset to first page
+    fetchOpportunities();
   };
 
   const handleClearAll = () => {
@@ -172,7 +198,7 @@ export default function OpportunitiesList() {
     setAgencyFilter("");
     setSetAsideFilter("");
     setStateFilter("");
-    clearFilters();
+    setPage(1);
   };
 
   const activeFilterCount = [
@@ -181,7 +207,6 @@ export default function OpportunitiesList() {
     agencyFilter,
     setAsideFilter,
     stateFilter,
-    filters.min_score && filters.min_score > 0 ? "score" : "",
   ].filter(Boolean).length;
 
   const totalPages = Math.ceil(total / pageSize);
@@ -227,18 +252,7 @@ export default function OpportunitiesList() {
                   onChange={(e) => setSearchInput(e.target.value)}
                 />
               </div>
-              <div className="w-full lg:w-40">
-                <Label>Min Score</Label>
-                <select
-                  className="w-full px-4 py-2.5 text-sm border rounded-lg dark:bg-gray-900 dark:border-gray-700"
-                  value={filters.min_score || ""}
-                  onChange={(e) => setFilters({ min_score: e.target.value ? Number(e.target.value) : undefined })}
-                >
-                  <option value="">Any Score</option>
-                  <option value="70">High (70+)</option>
-                  <option value="40">Medium (40+)</option>
-                </select>
-              </div>
+              {/* Min Score removed for simpler UI */}
               <div className="flex gap-2 lg:self-end">
                 <Button type="submit" size="sm">
                   Search

@@ -229,9 +229,9 @@ async def get_optional_user(
         user = User(
             id=UUID(user_id),
             email=email,
-            hashed_password="",
+            password_hash="",  # Supabase handles auth, we don't need a password
             is_active=True,
-            is_verified=True,
+            email_verified=True,
             subscription_tier="free",
         )
         db.add(user)
