@@ -140,9 +140,9 @@ async def get_current_user(
         user = User(
             id=UUID(user_id),
             email=email,
-            hashed_password="",  # No password - Supabase handles auth
+            password_hash="",  # No password - Supabase handles auth
             is_active=True,
-            is_verified=True,  # Supabase handles email verification
+            email_verified=True,  # Supabase handles email verification
             subscription_tier="free",
         )
         db.add(user)
