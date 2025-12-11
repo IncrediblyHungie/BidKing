@@ -65,10 +65,17 @@ export const useOpportunitiesStore = create<OpportunitiesState>()((set, get) => 
     set({ isLoading: true, error: null });
     try {
       const currentFilters = filters || get().filters;
+      // Map OpportunityFilters to OpportunitySearchParams (API format)
       const response = await opportunitiesApi.list({
-        ...currentFilters,
+        query: currentFilters.keywords || undefined,
+        naics_codes: currentFilters.naics_codes?.length ? currentFilters.naics_codes : undefined,
+        states: currentFilters.state ? [currentFilters.state] : undefined,
+        set_aside_types: currentFilters.set_aside ? [currentFilters.set_aside] : undefined,
+        min_score: currentFilters.min_score,
         page: get().page,
         page_size: get().pageSize,
+        sort_by: currentFilters.sort_by,
+        sort_order: currentFilters.sort_order,
       });
       set({
         opportunities: response.items,
