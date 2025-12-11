@@ -29,6 +29,8 @@ interface UserRegister {
   company_name?: string;
 }
 
+type SocialProvider = 'google' | 'azure' | 'linkedin_oidc';
+
 interface AuthState {
   user: User | null;
   supabaseUser: SupabaseUser | null;
@@ -39,6 +41,7 @@ interface AuthState {
 
   // Actions
   login: (credentials: UserLogin) => Promise<void>;
+  loginWithProvider: (provider: SocialProvider) => Promise<void>;
   register: (data: UserRegister) => Promise<void>;
   logout: () => Promise<void>;
   fetchUser: () => Promise<void>;
@@ -145,6 +148,29 @@ export const useAuthStore = create<AuthState>()(
           set({
             isLoading: false,
             error: error.message || 'Login failed',
+          });
+          throw error;
+        }
+      },
+
+      loginWithProvider: async (provider: SocialProvider) => {
+        set({ isLoading: true, error: null });
+        try {
+          const { error } = await supabase.auth.signInWithOAuth({
+            provider,
+            options: {
+              redirectTo: `${window.location.origin}/dashboard`,
+            },
+          });
+
+          if (error) {
+            throw error;
+          }
+          // OAuth will redirect, so we don't need to handle success here
+        } catch (error: any) {
+          set({
+            isLoading: false,
+            error: error.message || 'Social login failed',
           });
           throw error;
         }

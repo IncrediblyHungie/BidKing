@@ -17,23 +17,27 @@ export const apiClient = axios.create({
   timeout: 30000,
 });
 
-// Request interceptor - add Supabase auth token
+// Request interceptor - add Supabase auth token (if available)
 apiClient.interceptors.request.use(
   async (config: InternalAxiosRequestConfig) => {
+    // Only try to add auth for non-public endpoints
+    // Public endpoints don't need auth and shouldn't fail if Supabase has issues
     try {
-      // Get current session from Supabase
       const { data: { session } } = await supabase.auth.getSession();
-
       if (session?.access_token) {
         config.headers.Authorization = `Bearer ${session.access_token}`;
       }
     } catch (error) {
       // Supabase session fetch failed - continue without auth
-      console.warn('Failed to get Supabase session:', error);
+      // This is expected for unauthenticated users
+      console.debug('No Supabase session available');
     }
     return config;
   },
-  (error) => Promise.reject(error)
+  (error) => {
+    console.error('Request interceptor error:', error);
+    return Promise.reject(error);
+  }
 );
 
 // Response interceptor - handle auth errors
