@@ -5,13 +5,13 @@
  */
 
 import { create } from 'zustand';
-import { Opportunity, OpportunityFilters } from '../types';
+import { Opportunity, OpportunityFilters, SavedOpportunity } from '../types';
 import { opportunitiesApi } from '../api';
 
 interface OpportunitiesState {
   opportunities: Opportunity[];
   selectedOpportunity: Opportunity | null;
-  savedOpportunities: Opportunity[];
+  savedOpportunities: SavedOpportunity[];
   isLoading: boolean;
   error: string | null;
 
@@ -46,6 +46,8 @@ const defaultFilters: OpportunityFilters = {
   response_deadline_to: undefined,
   min_score: undefined,
   status: 'active',
+  sort_by: 'response_deadline',
+  sort_order: 'asc',
 };
 
 export const useOpportunitiesStore = create<OpportunitiesState>()((set, get) => ({
@@ -119,13 +121,13 @@ export const useOpportunitiesStore = create<OpportunitiesState>()((set, get) => 
     }
   },
 
-  unsaveOpportunity: async (id: string) => {
+  unsaveOpportunity: async (savedId: string) => {
     try {
-      await opportunitiesApi.unsave(id);
+      await opportunitiesApi.unsave(savedId);
       // Remove from local state
       set((state) => ({
         savedOpportunities: state.savedOpportunities.filter(
-          (opp) => opp.id !== id
+          (saved) => saved.id !== savedId
         ),
       }));
     } catch (error: any) {

@@ -6,20 +6,22 @@ Handles searching, filtering, and viewing federal contract opportunities.
 
 from typing import List, Optional
 from uuid import UUID
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, and_, func
 
 from app.api.deps import get_db, get_current_user, get_optional_user, rate_limit_search
-from app.models import User, Opportunity, SavedOpportunity, PointOfContact
+from app.models import User, Opportunity, SavedOpportunity, PointOfContact, OpportunityAttachment, OpportunityHistory
 from app.schemas.opportunity import (
     OpportunityResponse,
     OpportunityListResponse,
     OpportunitySearch,
     SavedOpportunityCreate,
+    SavedOpportunityUpdate,
     SavedOpportunityResponse,
+    VALID_PIPELINE_STATUSES,
 )
 from app.services.scoring import get_score_category, explain_score
 
@@ -235,6 +237,16 @@ async def get_opportunity(
         PointOfContact.opportunity_id == opportunity.id
     ).all()
 
+    # Load attachments
+    opportunity.attachments = db.query(OpportunityAttachment).filter(
+        OpportunityAttachment.opportunity_id == opportunity.id
+    ).all()
+
+    # Load history (ordered by date desc)
+    opportunity.history = db.query(OpportunityHistory).filter(
+        OpportunityHistory.opportunity_id == opportunity.id
+    ).order_by(OpportunityHistory.changed_at.desc()).all()
+
     return opportunity
 
 
@@ -339,6 +351,58 @@ async def save_opportunity(
     return saved
 
 
+@router.patch("/saved/{saved_id}", response_model=SavedOpportunityResponse)
+async def update_saved_opportunity(
+    saved_id: UUID,
+    data: SavedOpportunityUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Update a saved opportunity (status, notes, priority, reminder).
+    """
+    saved = db.query(SavedOpportunity).filter(
+        SavedOpportunity.id == saved_id,
+        SavedOpportunity.user_id == current_user.id,
+    ).first()
+
+    if not saved:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Saved opportunity not found",
+        )
+
+    # Track if status changed
+    old_status = saved.status
+
+    # Update fields if provided
+    if data.status is not None:
+        if data.status.lower() not in VALID_PIPELINE_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid status. Must be one of: {VALID_PIPELINE_STATUSES}",
+            )
+        saved.status = data.status.lower()
+
+    if data.notes is not None:
+        saved.notes = data.notes
+
+    if data.priority is not None:
+        saved.priority = data.priority
+
+    if data.reminder_date is not None:
+        saved.reminder_date = data.reminder_date
+
+    # Update stage_changed_at if status changed
+    if saved.status != old_status:
+        saved.stage_changed_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(saved)
+
+    return saved
+
+
 @router.delete("/saved/{saved_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def unsave_opportunity(
     saved_id: UUID,
@@ -361,3 +425,40 @@ async def unsave_opportunity(
 
     db.delete(saved)
     db.commit()
+
+
+@router.get("/saved/stats")
+async def get_pipeline_stats(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Get pipeline statistics for current user.
+    """
+    # Count by status
+    status_counts = db.query(
+        SavedOpportunity.status,
+        func.count(SavedOpportunity.id).label("count")
+    ).filter(
+        SavedOpportunity.user_id == current_user.id
+    ).group_by(SavedOpportunity.status).all()
+
+    stats = {status: 0 for status in VALID_PIPELINE_STATUSES}
+    for status_name, count in status_counts:
+        stats[status_name] = count
+
+    # Get opportunities with upcoming deadlines
+    upcoming_deadlines = db.query(SavedOpportunity).join(
+        Opportunity
+    ).filter(
+        SavedOpportunity.user_id == current_user.id,
+        SavedOpportunity.status.in_(["watching", "researching", "preparing"]),
+        Opportunity.response_deadline >= datetime.utcnow(),
+        Opportunity.response_deadline <= datetime.utcnow() + timedelta(days=7),
+    ).count()
+
+    return {
+        "by_status": stats,
+        "total": sum(stats.values()),
+        "upcoming_deadlines_7_days": upcoming_deadlines,
+    }

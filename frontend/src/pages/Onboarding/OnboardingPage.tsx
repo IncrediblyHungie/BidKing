@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate } from "react-router";
+import { useState, useEffect } from "react";
+import { useNavigate, useLocation } from "react-router";
 import { useAuthStore } from "../../stores/authStore";
 import { useProfileStore } from "../../stores/profileStore";
 import Label from "../../components/form/Label";
@@ -7,14 +7,24 @@ import Input from "../../components/form/input/InputField";
 import Button from "../../components/ui/button/Button";
 import toast from "react-hot-toast";
 
+interface LocationState {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+}
+
 export default function OnboardingPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuthStore();
   const { completeOnboarding, isLoading } = useProfileStore();
 
+  // Get data passed from signup form
+  const locationState = location.state as LocationState | null;
+
   const [formData, setFormData] = useState({
-    first_name: "",
-    last_name: "",
+    first_name: locationState?.firstName || "",
+    last_name: locationState?.lastName || "",
     phone: "",
     company_name: "",
     bio: "",
@@ -23,6 +33,22 @@ export default function OnboardingPage() {
     state: "",
     postal_code: "",
   });
+
+  // Store email from signup for use when user object isn't available yet
+  const [signupEmail, setSignupEmail] = useState(locationState?.email || "");
+
+  useEffect(() => {
+    if (locationState?.firstName) {
+      setFormData(prev => ({
+        ...prev,
+        first_name: locationState.firstName || prev.first_name,
+        last_name: locationState.lastName || prev.last_name,
+      }));
+    }
+    if (locationState?.email) {
+      setSignupEmail(locationState.email);
+    }
+  }, [locationState]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -37,20 +63,23 @@ export default function OnboardingPage() {
       return;
     }
 
-    if (!user?.id) {
-      toast.error("User not found. Please log in again.");
-      return;
-    }
-
-    try {
-      await completeOnboarding(user.id, {
-        ...formData,
-        email: user.email,
-      });
-      toast.success("Profile setup complete!");
-      navigate("/dashboard");
-    } catch (err: any) {
-      toast.error(err.message || "Failed to save profile");
+    // If user is authenticated, save to Supabase
+    if (user?.id) {
+      try {
+        await completeOnboarding(user.id, {
+          ...formData,
+          email: user.email || signupEmail,
+        });
+        toast.success("Profile setup complete!");
+        navigate("/dashboard");
+      } catch (err: any) {
+        toast.error(err.message || "Failed to save profile");
+      }
+    } else {
+      // User might need to confirm email first - just go to dashboard
+      // Profile will be saved when they complete email verification
+      toast.success("Please check your email to confirm your account, then sign in!");
+      navigate("/signin");
     }
   };
 

@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 7
 
     # ==========================================================================
+    # Supabase
+    # ==========================================================================
+    supabase_url: str = "https://kihbcuxmlpzjbcrxirkq.supabase.co"
+    supabase_jwt_secret: str = ""  # Get from Supabase dashboard Settings > API > JWT Secret
+
+    # ==========================================================================
     # SAM.gov API
     # ==========================================================================
     sam_gov_api_key: str = ""

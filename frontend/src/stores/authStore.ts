@@ -268,6 +268,7 @@ export const useAuthStore = create<AuthState>()(
     {
       name: 'bidking-auth',
       partialize: (state) => ({
+        user: state.user,
         isAuthenticated: state.isAuthenticated,
       }),
     }

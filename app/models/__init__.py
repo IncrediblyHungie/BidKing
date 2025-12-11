@@ -7,7 +7,7 @@ All SQLAlchemy models are imported here for easy access.
 from app.models.user import User
 from app.models.subscription import Subscription, UsageTracking
 from app.models.alert_profile import AlertProfile
-from app.models.opportunity import Opportunity, PointOfContact, SavedOpportunity
+from app.models.opportunity import Opportunity, PointOfContact, SavedOpportunity, OpportunityAttachment, OpportunityHistory
 from app.models.alert_sent import AlertSent
 from app.models.market_data import (
     ContractAward,
@@ -25,6 +25,8 @@ __all__ = [
     "Opportunity",
     "PointOfContact",
     "SavedOpportunity",
+    "OpportunityAttachment",
+    "OpportunityHistory",
     "AlertSent",
     "ContractAward",
     "NAICSStatistics",

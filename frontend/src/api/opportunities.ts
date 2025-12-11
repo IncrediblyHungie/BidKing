@@ -8,6 +8,9 @@ import {
   OpportunityListResponse,
   OpportunitySearchParams,
   OpportunityStats,
+  SavedOpportunity,
+  SavedOpportunityUpdate,
+  PipelineStats,
 } from '../types';
 
 export const opportunitiesApi = {
@@ -52,7 +55,7 @@ export const opportunitiesApi = {
   /**
    * List saved opportunities
    */
-  listSaved: async (statusFilter?: string): Promise<any[]> => {
+  listSaved: async (statusFilter?: string): Promise<SavedOpportunity[]> => {
     const params = statusFilter ? { status_filter: statusFilter } : {};
     const response = await apiClient.get('/opportunities/saved/list', { params });
     return response.data;
@@ -66,8 +69,16 @@ export const opportunitiesApi = {
     notes?: string;
     status?: string;
     priority?: number;
-  }): Promise<any> => {
+  }): Promise<SavedOpportunity> => {
     const response = await apiClient.post('/opportunities/saved', data);
+    return response.data;
+  },
+
+  /**
+   * Update a saved opportunity
+   */
+  updateSaved: async (savedId: string, data: SavedOpportunityUpdate): Promise<SavedOpportunity> => {
+    const response = await apiClient.patch(`/opportunities/saved/${savedId}`, data);
     return response.data;
   },
 
@@ -76,6 +87,14 @@ export const opportunitiesApi = {
    */
   unsave: async (savedId: string): Promise<void> => {
     await apiClient.delete(`/opportunities/saved/${savedId}`);
+  },
+
+  /**
+   * Get pipeline statistics
+   */
+  getPipelineStats: async (): Promise<PipelineStats> => {
+    const response = await apiClient.get('/opportunities/saved/stats');
+    return response.data;
   },
 };
 

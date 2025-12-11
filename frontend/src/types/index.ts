@@ -72,8 +72,35 @@ export interface PointOfContact {
   name: string | null;
   email: string | null;
   phone: string | null;
+  fax: string | null;
   title: string | null;
   type: string | null;
+}
+
+export interface OpportunityAttachment {
+  id: string;
+  name: string | null;
+  description: string | null;
+  url: string | null;
+  resource_type: string | null;
+  file_type: string | null;
+  file_size: number | null;
+  posted_date: string | null;
+}
+
+export interface OpportunityHistory {
+  id: string;
+  action: string;
+  changed_at: string;
+  description: string | null;
+}
+
+export interface ContractingOfficeAddress {
+  street: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  country: string | null;
 }
 
 export interface Opportunity {
@@ -82,27 +109,67 @@ export interface Opportunity {
   solicitation_number: string | null;
   title: string;
   description: string | null;
+
+  // Dates
   posted_date: string | null;
+  original_published_date: string | null;
   response_deadline: string | null;
   archive_date: string | null;
-  type: string | null;
-  type_description: string | null;
+  original_inactive_date: string | null;
+  inactive_policy: string | null;
+
+  // Classification
+  notice_type: string | null;
+  related_notice_id: string | null;
   naics_code: string | null;
   naics_description: string | null;
   psc_code: string | null;
   psc_description: string | null;
+
+  // Agency
+  department_name: string | null;
+  sub_tier: string | null;
   agency_name: string | null;
-  sub_agency_name: string | null;
   office_name: string | null;
+  contracting_office_address: ContractingOfficeAddress | null;
+
+  // Location (Place of Performance)
   pop_city: string | null;
   pop_state: string | null;
   pop_zip: string | null;
   pop_country: string | null;
+
+  // Set-aside
   set_aside_type: string | null;
   set_aside_description: string | null;
+
+  // Contract Details
+  contract_type: string | null;
+  authority: string | null;
+  initiative: string | null;
+
+  // Award Information
+  award_number: string | null;
+  task_delivery_order_number: string | null;
+  modification_number: string | null;
+  award_amount: string | number | null;
+  award_date: string | null;
+  awardee_name: string | null;
+  awardee_uei: string | null;
+
+  // Scoring
   likelihood_score: number;
-  sam_gov_link: string | null;
+
+  // Links
+  ui_link: string | null;
+
+  // Status
+  status: string | null;
+
+  // Relationships
   points_of_contact: PointOfContact[];
+  attachments: OpportunityAttachment[];
+  history: OpportunityHistory[];
 }
 
 export interface OpportunityListResponse {
@@ -140,6 +207,8 @@ export interface OpportunityFilters {
   status?: 'active' | 'inactive' | 'all';
   page?: number;
   page_size?: number;
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
 }
 
 // Market Intelligence types
@@ -193,6 +262,35 @@ export interface Recompete {
   linked_opportunity_id: string | null;
   created_at: string;
   updated_at: string;
+}
+
+// Pipeline/Saved Opportunity types
+export type PipelineStatus = 'watching' | 'researching' | 'preparing' | 'submitted' | 'won' | 'lost' | 'archived';
+
+export interface SavedOpportunity {
+  id: string;
+  user_id: string;
+  opportunity: Opportunity;
+  notes: string | null;
+  status: PipelineStatus;
+  priority: number;
+  reminder_date: string | null;
+  stage_changed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SavedOpportunityUpdate {
+  status?: PipelineStatus;
+  notes?: string;
+  priority?: number;
+  reminder_date?: string;
+}
+
+export interface PipelineStats {
+  by_status: Record<PipelineStatus, number>;
+  total: number;
+  upcoming_deadlines_7_days: number;
 }
 
 // Subscription types

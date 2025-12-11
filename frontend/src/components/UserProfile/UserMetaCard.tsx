@@ -13,13 +13,29 @@ export default function UserMetaCard() {
     ? `${profile.city}, ${profile.state}`
     : profile?.country || "Location not set";
 
+  // Get initials from first and last name, or first letter of email
+  const getInitials = () => {
+    if (profile?.first_name && profile?.last_name) {
+      return `${profile.first_name.charAt(0)}${profile.last_name.charAt(0)}`.toUpperCase();
+    }
+    if (profile?.first_name) {
+      return profile.first_name.charAt(0).toUpperCase();
+    }
+    // For email, get the first letter that's not a number
+    const email = user?.email || '';
+    const firstLetter = email.split('').find(char => /[a-zA-Z]/.test(char));
+    return firstLetter?.toUpperCase() || 'U';
+  };
+
+  const initials = getInitials();
+
   return (
     <div className="p-5 border border-gray-200 rounded-2xl dark:border-gray-800 lg:p-6">
       <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex flex-col items-center w-full gap-6 xl:flex-row">
           <div className="w-20 h-20 overflow-hidden border border-gray-200 rounded-full dark:border-gray-800 bg-brand-500 flex items-center justify-center">
             <span className="text-2xl font-bold text-white">
-              {displayName.charAt(0).toUpperCase()}
+              {initials}
             </span>
           </div>
           <div className="order-3 xl:order-2">

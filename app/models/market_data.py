@@ -194,7 +194,7 @@ class RecompeteOpportunity(Base):
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
 
     # Source award reference
-    award_id = Column(String(100), nullable=False, index=True)
+    award_id = Column(String(100), unique=True, nullable=False, index=True)
     piid = Column(String(50), nullable=False)
 
     # Expiration tracking

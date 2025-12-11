@@ -7,6 +7,7 @@ import {
   ChevronDownIcon,
   GridIcon,
   HorizontaLDots,
+  ListIcon,
   PageIcon,
   PlugInIcon,
   UserCircleIcon,
@@ -31,6 +32,16 @@ const navItems: NavItem[] = [
     icon: <BoxCubeIcon />,
     name: "Opportunities",
     path: "/opportunities",
+  },
+  {
+    icon: <ListIcon />,
+    name: "Pipeline",
+    path: "/pipeline",
+  },
+  {
+    icon: <PageIcon />,
+    name: "Recompetes",
+    path: "/recompetes",
   },
   {
     icon: <PlugInIcon />,

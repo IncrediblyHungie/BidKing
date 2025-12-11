@@ -18,6 +18,9 @@ redis==5.0.1
 # Task Queue
 celery==5.3.6
 
+# Scheduler
+apscheduler==3.10.4
+
 # Authentication
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4

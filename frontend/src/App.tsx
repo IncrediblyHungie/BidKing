@@ -17,8 +17,11 @@ import UserProfiles from "./pages/UserProfiles";
 // BidKing pages
 import OpportunitiesList from "./pages/Opportunities/OpportunitiesList";
 import OpportunityDetail from "./pages/Opportunities/OpportunityDetail";
+import RecompetesList from "./pages/Recompetes/RecompetesList";
+import RecompeteDetail from "./pages/Recompetes/RecompeteDetail";
 import AlertProfilesList from "./pages/Alerts/AlertProfilesList";
 import AlertProfileForm from "./pages/Alerts/AlertProfileForm";
+import PipelinePage from "./pages/Pipeline/PipelinePage";
 
 // Other pages
 import NotFound from "./pages/OtherPage/NotFound";
@@ -59,6 +62,13 @@ export default function App() {
             {/* Opportunities */}
             <Route path="/opportunities" element={<OpportunitiesList />} />
             <Route path="/opportunities/:id" element={<OpportunityDetail />} />
+
+            {/* Recompetes */}
+            <Route path="/recompetes" element={<RecompetesList />} />
+            <Route path="/recompetes/:id" element={<RecompeteDetail />} />
+
+            {/* Pipeline */}
+            <Route path="/pipeline" element={<PipelinePage />} />
 
             {/* Alert Profiles */}
             <Route path="/alerts" element={<AlertProfilesList />} />

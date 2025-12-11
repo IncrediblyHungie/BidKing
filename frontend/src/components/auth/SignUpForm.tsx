@@ -44,8 +44,14 @@ export default function SignUpForm() {
         company_name: `${firstName} ${lastName}`,
       });
       toast.success("Account created! Let's set up your profile.");
-      // Navigate to onboarding on successful registration
-      navigate("/onboarding");
+      // Navigate to onboarding on successful registration, pass name data via state
+      navigate("/onboarding", {
+        state: {
+          firstName,
+          lastName,
+          email
+        }
+      });
     } catch (err: any) {
       toast.error(err.message || "Registration failed");
     }

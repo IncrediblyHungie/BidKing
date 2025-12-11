@@ -1,8 +1,10 @@
 /**
  * API Client - Axios configuration for BidKing FastAPI backend
+ * Uses Supabase JWT tokens for authentication
  */
 
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import { supabase } from '../lib/supabase';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
 
@@ -15,22 +17,37 @@ export const apiClient = axios.create({
   timeout: 30000,
 });
 
-// Request interceptor - add auth token
+// Request interceptor - add Supabase auth token
 apiClient.interceptors.request.use(
-  (config: InternalAxiosRequestConfig) => {
-    const token = localStorage.getItem('access_token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+  async (config: InternalAxiosRequestConfig) => {
+    try {
+      // Get current session from Supabase
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (session?.access_token) {
+        config.headers.Authorization = `Bearer ${session.access_token}`;
+      }
+    } catch (error) {
+      // Supabase session fetch failed - continue without auth
+      console.warn('Failed to get Supabase session:', error);
     }
     return config;
   },
   (error) => Promise.reject(error)
 );
 
-// Response interceptor - handle auth errors and token refresh
+// Response interceptor - handle auth errors
 apiClient.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
+    // Log errors for debugging
+    console.error('API Error:', {
+      url: error.config?.url,
+      status: error.response?.status,
+      message: error.message,
+      data: error.response?.data,
+    });
+
     const originalRequest = error.config;
 
     // If 401 and we haven't tried refreshing yet
@@ -38,24 +55,21 @@ apiClient.interceptors.response.use(
       originalRequest._retry = true;
 
       try {
-        const refreshToken = localStorage.getItem('refresh_token');
-        if (refreshToken) {
-          const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
-            refresh_token: refreshToken,
-          });
+        // Try to refresh the Supabase session
+        const { data: { session }, error: refreshError } = await supabase.auth.refreshSession();
 
-          const { access_token, refresh_token } = response.data;
-          localStorage.setItem('access_token', access_token);
-          localStorage.setItem('refresh_token', refresh_token);
-
-          // Retry original request with new token
-          originalRequest.headers.Authorization = `Bearer ${access_token}`;
-          return apiClient(originalRequest);
+        if (refreshError || !session) {
+          // Refresh failed - redirect to login
+          console.warn('Session refresh failed, redirecting to signin');
+          window.location.href = '/signin';
+          return Promise.reject(refreshError || new Error('Session expired'));
         }
+
+        // Retry original request with new token
+        originalRequest.headers.Authorization = `Bearer ${session.access_token}`;
+        return apiClient(originalRequest);
       } catch (refreshError) {
-        // Refresh failed - clear tokens and redirect to login
-        localStorage.removeItem('access_token');
-        localStorage.removeItem('refresh_token');
+        console.error('Session refresh error:', refreshError);
         window.location.href = '/signin';
         return Promise.reject(refreshError);
       }

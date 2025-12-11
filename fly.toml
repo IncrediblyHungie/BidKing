@@ -33,7 +33,7 @@ primary_region = "sjc"  # San Jose (closest to California)
 [processes]
   app = "uvicorn app.main:app --host 0.0.0.0 --port 8000"
 
-[[mounts]]
+[mounts]
   source = "bidking_data"
   destination = "/app/data"
   processes = ["app"]
