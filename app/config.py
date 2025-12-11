@@ -126,6 +126,7 @@ SUBSCRIPTION_TIERS = {
             "naics_codes_per_profile": 3,
             "keywords_per_profile": 5,
             "states_per_profile": 1,
+            "api_calls_per_hour": 100,
         },
         "features": {
             "instant_alerts": False,
@@ -152,6 +153,7 @@ SUBSCRIPTION_TIERS = {
             "naics_codes_per_profile": 10,
             "keywords_per_profile": 20,
             "states_per_profile": 10,
+            "api_calls_per_hour": 500,
         },
         "features": {
             "instant_alerts": True,
@@ -178,6 +180,7 @@ SUBSCRIPTION_TIERS = {
             "naics_codes_per_profile": 50,
             "keywords_per_profile": 100,
             "states_per_profile": 50,
+            "api_calls_per_hour": 2000,
         },
         "features": {
             "instant_alerts": True,
