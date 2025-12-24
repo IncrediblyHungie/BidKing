@@ -271,10 +271,22 @@ class SAMGovScraper:
             data = response.json()
 
             attachments = []
-            attachment_lists = data.get("_embedded", {}).get("opportunityAttachmentList", [])
+            embedded = data.get("_embedded") or {}
+            if not isinstance(embedded, dict):
+                embedded = {}
+            attachment_lists = embedded.get("opportunityAttachmentList") or []
+            if not isinstance(attachment_lists, list):
+                attachment_lists = []
 
             for att_list in attachment_lists:
-                for att in att_list.get("attachments", []):
+                if not isinstance(att_list, dict):
+                    continue
+                att_items = att_list.get("attachments") or []
+                if not isinstance(att_items, list):
+                    continue
+                for att in att_items:
+                    if not isinstance(att, dict):
+                        continue
                     if att.get("deletedFlag") == "1":
                         continue
 
@@ -353,16 +365,18 @@ class SAMGovScraper:
                 detail["is_active"] = search_item.get("isActive", True)
                 detail["notice_type"] = search_item.get("type", {}).get("value")
 
-                # Get organization hierarchy
-                org_hierarchy = search_item.get("organizationHierarchy", [])
+                # Get organization hierarchy (with null safety)
+                org_hierarchy = search_item.get("organizationHierarchy") or []
+                if not isinstance(org_hierarchy, list):
+                    org_hierarchy = []
                 detail["department"] = next(
-                    (o["name"] for o in org_hierarchy if o.get("type") == "DEPARTMENT"), None
+                    (o["name"] for o in org_hierarchy if isinstance(o, dict) and o.get("type") == "DEPARTMENT"), None
                 )
                 detail["agency"] = next(
-                    (o["name"] for o in org_hierarchy if o.get("type") == "AGENCY"), None
+                    (o["name"] for o in org_hierarchy if isinstance(o, dict) and o.get("type") == "AGENCY"), None
                 )
                 detail["office"] = next(
-                    (o["name"] for o in org_hierarchy if o.get("type") == "OFFICE"), None
+                    (o["name"] for o in org_hierarchy if isinstance(o, dict) and o.get("type") == "OFFICE"), None
                 )
 
                 # Get attachments
