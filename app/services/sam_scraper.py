@@ -155,37 +155,76 @@ class SAMGovScraper:
             response.raise_for_status()
             data = response.json()
 
-            # Extract key fields from the nested structure
-            data2 = data.get("data2", {})
-            description = data.get("description", {})
+            # Handle case where API returns a list instead of dict
+            if isinstance(data, list):
+                if len(data) > 0:
+                    data = data[0]
+                else:
+                    return None
 
-            # Parse NAICS codes
-            naics_list = data2.get("naics", [])
+            # Ensure we have a dict
+            if not isinstance(data, dict):
+                logger.warning(f"Unexpected data type for {notice_id}: {type(data)}")
+                return None
+
+            # Extract key fields from the nested structure
+            data2 = data.get("data2") or data.get("data") or {}
+            if not isinstance(data2, dict):
+                data2 = {}
+            description = data.get("description") or {}
+            if not isinstance(description, dict):
+                description = {"body": str(description) if description else ""}
+
+            # Parse NAICS codes (with safe type checking)
+            naics_list = data2.get("naics") or []
+            if not isinstance(naics_list, list):
+                naics_list = []
             primary_naics = None
             all_naics = []
             for n in naics_list:
-                codes = n.get("code", [])
-                all_naics.extend(codes)
-                if n.get("type") == "primary" and codes:
-                    primary_naics = codes[0]
+                if isinstance(n, dict):
+                    codes = n.get("code", [])
+                    if isinstance(codes, list):
+                        all_naics.extend(codes)
+                        if n.get("type") == "primary" and codes:
+                            primary_naics = codes[0]
+                    elif isinstance(codes, str):
+                        all_naics.append(codes)
+                        if n.get("type") == "primary":
+                            primary_naics = codes
 
-            # Parse set-aside
-            solicitation = data2.get("solicitation", {})
+            # Parse set-aside (with safe type checking)
+            solicitation = data2.get("solicitation") or {}
+            if not isinstance(solicitation, dict):
+                solicitation = {}
             set_aside = solicitation.get("setAside")
 
-            # Parse place of performance
-            pop = data2.get("placeOfPerformance", {})
-            pop_city = pop.get("city", {}).get("name")
-            pop_state = pop.get("state", {}).get("code")
-            pop_country = pop.get("country", {}).get("code")
+            # Parse place of performance (with safe type checking)
+            pop = data2.get("placeOfPerformance") or {}
+            if not isinstance(pop, dict):
+                pop = {}
+            pop_city_obj = pop.get("city") or {}
+            pop_state_obj = pop.get("state") or {}
+            pop_country_obj = pop.get("country") or {}
+            pop_city = pop_city_obj.get("name") if isinstance(pop_city_obj, dict) else None
+            pop_state = pop_state_obj.get("code") if isinstance(pop_state_obj, dict) else None
+            pop_country = pop_country_obj.get("code") if isinstance(pop_country_obj, dict) else None
 
             # Parse point of contact
-            contacts = data2.get("pointOfContact", [])
-            primary_contact = next((c for c in contacts if c.get("type") == "primary"), None)
+            contacts = data2.get("pointOfContact") or []
+            if not isinstance(contacts, list):
+                contacts = []
+            primary_contact = next((c for c in contacts if isinstance(c, dict) and c.get("type") == "primary"), None)
 
             # Parse deadlines
-            deadlines = solicitation.get("deadlines", {})
+            deadlines = solicitation.get("deadlines") or {}
+            if not isinstance(deadlines, dict):
+                deadlines = {}
             response_deadline = deadlines.get("response")
+
+            # Parse archive date safely
+            archive = data2.get("archive") or {}
+            archive_date = archive.get("date") if isinstance(archive, dict) else None
 
             return {
                 "notice_id": notice_id,
@@ -199,8 +238,8 @@ class SAMGovScraper:
                 "pop_country": pop_country,
                 "primary_contact": primary_contact,
                 "response_deadline": response_deadline,
-                "archive_date": data2.get("archive", {}).get("date"),
-                "description": description.get("body", ""),
+                "archive_date": archive_date,
+                "description": description.get("body", "") if isinstance(description, dict) else "",
                 "raw_data": data,
             }
 
