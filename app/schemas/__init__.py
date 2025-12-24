@@ -31,6 +31,19 @@ from app.schemas.market_data import (
     CompetitorResponse,
     RecompeteResponse,
 )
+from app.schemas.company import (
+    CompanyProfileCreate,
+    CompanyProfileUpdate,
+    CompanyProfileResponse,
+    CompanyNAICSCreate,
+    CompanyNAICSResponse,
+    CompanyCertificationCreate,
+    CompanyCertificationResponse,
+    PastPerformanceCreate,
+    PastPerformanceResponse,
+    OnboardingStatusResponse,
+    OpportunityScoreResponse,
+)
 
 __all__ = [
     # User
@@ -59,4 +72,16 @@ __all__ = [
     "LaborRateResponse",
     "CompetitorResponse",
     "RecompeteResponse",
+    # Company Profile & Scoring
+    "CompanyProfileCreate",
+    "CompanyProfileUpdate",
+    "CompanyProfileResponse",
+    "CompanyNAICSCreate",
+    "CompanyNAICSResponse",
+    "CompanyCertificationCreate",
+    "CompanyCertificationResponse",
+    "PastPerformanceCreate",
+    "PastPerformanceResponse",
+    "OnboardingStatusResponse",
+    "OpportunityScoreResponse",
 ]

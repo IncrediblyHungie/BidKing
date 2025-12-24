@@ -13,7 +13,7 @@ RUN npm ci
 COPY . .
 
 # Set API URL for build
-ARG VITE_API_URL=https://bidking-api.fly.dev/api/v1
+ARG VITE_API_URL=https://api.bidking.ai/api/v1
 ENV VITE_API_URL=$VITE_API_URL
 
 # Build the app

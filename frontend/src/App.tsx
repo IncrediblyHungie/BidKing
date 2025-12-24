@@ -9,6 +9,7 @@ import LandingPage from "./pages/Landing/LandingPage";
 import SignIn from "./pages/AuthPages/SignIn";
 import SignUp from "./pages/AuthPages/SignUp";
 import OnboardingPage from "./pages/Onboarding/OnboardingPage";
+import CompanyOnboardingPage from "./pages/Onboarding/CompanyOnboardingPage";
 
 // Dashboard pages
 import Home from "./pages/Dashboard/Home";
@@ -22,6 +23,7 @@ import RecompeteDetail from "./pages/Recompetes/RecompeteDetail";
 import AlertProfilesList from "./pages/Alerts/AlertProfilesList";
 import AlertProfileForm from "./pages/Alerts/AlertProfileForm";
 import PipelinePage from "./pages/Pipeline/PipelinePage";
+import AnalyticsPage from "./pages/Analytics/AnalyticsPage";
 
 // Other pages
 import NotFound from "./pages/OtherPage/NotFound";
@@ -70,6 +72,9 @@ export default function App() {
             {/* Pipeline */}
             <Route path="/pipeline" element={<PipelinePage />} />
 
+            {/* Analytics */}
+            <Route path="/analytics" element={<AnalyticsPage />} />
+
             {/* Alert Profiles */}
             <Route path="/alerts" element={<AlertProfilesList />} />
             <Route path="/alerts/create" element={<AlertProfileForm />} />
@@ -77,6 +82,9 @@ export default function App() {
 
             {/* User Profile */}
             <Route path="/profile" element={<UserProfiles />} />
+
+            {/* Company Settings (edit mode - inside dashboard layout) */}
+            <Route path="/settings/company" element={<CompanyOnboardingPage />} />
 
             {/* Settings & Other */}
             <Route path="/calendar" element={<Calendar />} />
@@ -91,6 +99,7 @@ export default function App() {
           <Route path="/signin" element={<SignIn />} />
           <Route path="/signup" element={<SignUp />} />
           <Route path="/onboarding" element={<OnboardingPage />} />
+          <Route path="/company-setup" element={<CompanyOnboardingPage />} />
 
           {/* Fallback Route */}
           <Route path="*" element={<NotFound />} />

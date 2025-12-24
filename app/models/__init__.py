@@ -17,6 +17,16 @@ from app.models.market_data import (
     LaborRateCache,
     CommonJobTitle,
 )
+from app.models.company import (
+    CompanyProfile,
+    CompanyNAICS,
+    CompanyCertification,
+    PastPerformance,
+    CapabilityStatement,
+    OpportunityMetadata,
+    OpportunityScore,
+    OpportunityDecision,
+)
 
 __all__ = [
     "User",
@@ -35,4 +45,13 @@ __all__ = [
     "LaborRateCache",
     "CommonJobTitle",
     "UsageTracking",
+    # Company & Scoring models
+    "CompanyProfile",
+    "CompanyNAICS",
+    "CompanyCertification",
+    "PastPerformance",
+    "CapabilityStatement",
+    "OpportunityMetadata",
+    "OpportunityScore",
+    "OpportunityDecision",
 ]

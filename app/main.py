@@ -31,7 +31,11 @@ async def lifespan(app: FastAPI):
         User, Subscription, UsageTracking, AlertProfile,
         Opportunity, PointOfContact, SavedOpportunity, AlertSent,
         ContractAward, NAICSStatistics, Recipient, RecompeteOpportunity,
-        LaborRateCache, CommonJobTitle
+        LaborRateCache, CommonJobTitle, OpportunityAttachment, OpportunityHistory,
+        # Company & Scoring models
+        CompanyProfile, CompanyNAICS, CompanyCertification,
+        PastPerformance, CapabilityStatement, OpportunityMetadata,
+        OpportunityScore, OpportunityDecision
     )
     print("Creating database tables...")
     Base.metadata.create_all(bind=engine)
@@ -757,6 +761,34 @@ async def backfill_recompete_values():
     }
 
 
+@app.post("/api/v1/admin/opportunities/ai-summarize")
+async def trigger_ai_summarization(limit: int = 50, force: bool = False):
+    """
+    Manually trigger AI summarization of PDF attachments.
+
+    This analyzes extracted PDF text using Claude to generate structured summaries
+    including estimated contract value, clearance requirements, technologies, etc.
+
+    Args:
+        limit: Max number of PDFs to process (default: 50)
+        force: Re-summarize even if already done (default: False)
+
+    Note: This is automatically scheduled every 4 hours and on startup.
+    """
+    from app.services.ai_summarization import batch_summarize_attachments
+
+    results = batch_summarize_attachments(limit=limit, force=force)
+
+    return {
+        "status": "completed",
+        "processed": results["processed"],
+        "summarized": results["summarized"],
+        "failed": results["failed"],
+        "skipped": results["skipped"],
+        "errors": results["errors"][:10] if results["errors"] else [],
+    }
+
+
 # Public recompetes endpoint (no auth required)
 @app.get("/api/v1/public/recompetes")
 async def get_public_recompetes(
@@ -1026,25 +1058,48 @@ async def get_scheduler_status():
 
 
 @app.post("/admin/scheduler/run/{job_name}")
-async def run_scheduler_job(job_name: str):
+async def run_scheduler_job(
+    job_name: str,
+    naics_code: str = "541511",
+    max_results: int = 100,
+):
     """
     Manually trigger a specific scheduler job.
 
     Available jobs:
     - usaspending: Sync USAspending contract awards
-    - samgov: Sync SAM.gov opportunities
+    - samgov: Sync SAM.gov opportunities (rate-limited public API)
+    - scraper: Sync SAM.gov via internal API (NO rate limits - recommended!)
     - cleanup: Clean up expired recompetes
+    - backfill_attachments: Backfill attachments via SAM.gov internal API
+    - extract_pdf: Extract text from PDF attachments
+    - ai_summarize: AI analyze PDF attachments
+
+    For 'scraper' job:
+    - naics_code: NAICS code to sync (default: 541511 Custom Programming)
+    - max_results: Maximum opportunities to fetch (default: 100)
+
+    Example:
+    - POST /admin/scheduler/run/scraper?naics_code=541511&max_results=500
     """
     from app.services.scheduler import (
         sync_usaspending_job,
         sync_sam_gov_job,
         cleanup_expired_recompetes_job,
+        backfill_attachments_job,
+        extract_pdf_text_job,
+        ai_summarization_job,
+        scraper_sync_job,
     )
 
     jobs = {
         "usaspending": sync_usaspending_job,
         "samgov": sync_sam_gov_job,
+        "scraper": lambda: scraper_sync_job(naics_code=naics_code, max_results=max_results, biddable_only=True),
         "cleanup": cleanup_expired_recompetes_job,
+        "backfill_attachments": backfill_attachments_job,
+        "extract_pdf": extract_pdf_text_job,
+        "ai_summarize": ai_summarization_job,
     }
 
     if job_name not in jobs:
@@ -1056,11 +1111,12 @@ async def run_scheduler_job(job_name: str):
 
     # Run the job synchronously (for manual triggers)
     try:
-        jobs[job_name]()
+        result = jobs[job_name]()
         return {
             "status": "completed",
             "job": job_name,
             "message": f"Job '{job_name}' executed successfully",
+            "result": result if result else None,
         }
     except Exception as e:
         return {

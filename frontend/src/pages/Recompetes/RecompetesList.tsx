@@ -167,7 +167,7 @@ export default function RecompetesList() {
       if (maxValue) params.append("max_value", maxValue);
 
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL || "https://bidking-api.fly.dev/api/v1"}/public/recompetes?${params}`
+        `${import.meta.env.VITE_API_URL || "https://api.bidking.ai/api/v1"}/public/recompetes?${params}`
       );
 
       if (!response.ok) {
@@ -189,7 +189,7 @@ export default function RecompetesList() {
   const fetchFilterOptions = async () => {
     try {
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL || "https://bidking-api.fly.dev/api/v1"}/public/recompetes/filters`
+        `${import.meta.env.VITE_API_URL || "https://api.bidking.ai/api/v1"}/public/recompetes/filters`
       );
       if (response.ok) {
         const data = await response.json();
@@ -233,6 +233,37 @@ export default function RecompetesList() {
     setTimeout(() => fetchRecompetes(1), 0);
   };
 
+  const handleExportCSV = async () => {
+    try {
+      const params = new URLSearchParams();
+      if (searchQuery) params.append("search", searchQuery);
+      if (naicsFilter) params.append("naics_code", naicsFilter);
+      if (agencyFilter) params.append("agency", agencyFilter);
+      if (minValue) params.append("min_value", minValue);
+      if (maxValue) params.append("max_value", maxValue);
+      params.append("days_ahead", daysAhead.toString());
+
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL || "https://api.bidking.ai"}/api/v1/public/recompetes/export/csv?${params}`
+      );
+
+      if (!response.ok) throw new Error("Export failed");
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `bidking_recompetes_${new Date().toISOString().split("T")[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error("Export error:", err);
+      alert("Failed to export CSV");
+    }
+  };
+
   const activeFilterCount = [
     searchQuery,
     naicsFilter,
@@ -271,7 +302,7 @@ export default function RecompetesList() {
       if (maxValue) params.append("max_value", maxValue);
 
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL || "https://bidking-api.fly.dev/api/v1"}/public/recompetes?${params}`
+        `${import.meta.env.VITE_API_URL || "https://api.bidking.ai/api/v1"}/public/recompetes?${params}`
       );
 
       if (!response.ok) {
@@ -368,6 +399,12 @@ export default function RecompetesList() {
                     Clear All
                   </Button>
                 )}
+                <Button type="button" size="sm" variant="outline" onClick={handleExportCSV}>
+                  <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Export CSV
+                </Button>
               </div>
             </div>
 

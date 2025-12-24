@@ -8,6 +8,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { User as SupabaseUser, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
+import { getOnboardingStatus } from '../api/company';
 
 interface User {
   id: string;
@@ -62,6 +63,11 @@ export const useAuthStore = create<AuthState>()(
 
       initialize: async () => {
         try {
+          // Check if this is an OAuth callback (hash contains access_token or error)
+          const isOAuthCallback = window.location.hash.includes('access_token') ||
+                                   window.location.hash.includes('error') ||
+                                   window.location.search.includes('code=');
+
           // Get the current session from Supabase
           const { data: { session }, error } = await supabase.auth.getSession();
 
@@ -78,16 +84,39 @@ export const useAuthStore = create<AuthState>()(
               user: {
                 id: session.user.id,
                 email: session.user.email || '',
-                company_name: session.user.user_metadata?.company_name,
+                company_name: session.user.user_metadata?.company_name || session.user.user_metadata?.full_name,
                 subscription_tier: 'free',
                 is_verified: session.user.email_confirmed_at != null,
                 created_at: session.user.created_at,
               },
             });
+
+            // If this is an OAuth callback, handle the redirect
+            if (isOAuthCallback && window.location.pathname === '/') {
+              // Clear the hash/query from URL
+              window.history.replaceState(null, '', '/');
+              // Small delay to ensure state is set, then redirect
+              setTimeout(async () => {
+                try {
+                  const status = await getOnboardingStatus();
+                  if (!status.onboarding_completed && status.onboarding_step !== -1) {
+                    window.location.replace('/company-setup');
+                  } else {
+                    window.location.replace('/dashboard');
+                  }
+                } catch {
+                  // New user, redirect to onboarding
+                  window.location.replace('/company-setup');
+                }
+              }, 100);
+              return; // Don't set up listener yet, we're redirecting
+            }
           }
 
-          // Listen for auth state changes
-          supabase.auth.onAuthStateChange((_event, session) => {
+          // Listen for auth state changes (for non-callback scenarios)
+          supabase.auth.onAuthStateChange((event, session) => {
+            console.log('Auth state change:', event, session?.user?.email);
+
             if (session) {
               set({
                 session,
@@ -96,12 +125,28 @@ export const useAuthStore = create<AuthState>()(
                 user: {
                   id: session.user.id,
                   email: session.user.email || '',
-                  company_name: session.user.user_metadata?.company_name,
+                  company_name: session.user.user_metadata?.company_name || session.user.user_metadata?.full_name,
                   subscription_tier: 'free',
                   is_verified: session.user.email_confirmed_at != null,
                   created_at: session.user.created_at,
                 },
               });
+
+              // On SIGNED_IN event from OAuth, redirect if on landing page
+              if (event === 'SIGNED_IN' && (window.location.pathname === '/' || window.location.pathname === '/signin' || window.location.pathname === '/signup')) {
+                getOnboardingStatus()
+                  .then((status) => {
+                    if (!status.onboarding_completed && status.onboarding_step !== -1) {
+                      window.location.replace('/company-setup');
+                    } else {
+                      window.location.replace('/dashboard');
+                    }
+                  })
+                  .catch(() => {
+                    // New user, redirect to onboarding
+                    window.location.replace('/company-setup');
+                  });
+              }
             } else {
               set({
                 session: null,
@@ -159,7 +204,8 @@ export const useAuthStore = create<AuthState>()(
           const { error } = await supabase.auth.signInWithOAuth({
             provider,
             options: {
-              redirectTo: `${window.location.origin}/dashboard`,
+              // Redirect to root, auth listener will check onboarding and redirect appropriately
+              redirectTo: `${window.location.origin}/`,
             },
           });
 
@@ -199,6 +245,7 @@ export const useAuthStore = create<AuthState>()(
               session: authData.session,
               supabaseUser: authData.user,
               isAuthenticated: true,
+              isLoading: false,
               user: {
                 id: authData.user!.id,
                 email: authData.user!.email || '',
@@ -208,6 +255,9 @@ export const useAuthStore = create<AuthState>()(
                 created_at: authData.user!.created_at,
               },
             });
+            // Redirect new users to onboarding
+            window.location.href = '/company-setup';
+            return;
           }
 
           set({ isLoading: false });

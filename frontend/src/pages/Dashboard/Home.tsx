@@ -1,8 +1,21 @@
-import { useEffect } from "react";
-import { Link } from "react-router";
+import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router";
 import PageMeta from "../../components/common/PageMeta";
 import { useOpportunitiesStore } from "../../stores/opportunitiesStore";
 import { useAlertsStore } from "../../stores/alertsStore";
+import { apiClient } from "../../api/client";
+import { useAuthStore } from "../../stores/authStore";
+import { getOnboardingStatus } from "../../api/company";
+
+interface DashboardStats {
+  total_active: number;
+  new_today: number;
+  score_distribution: {
+    high: number;
+    medium: number;
+    low: number;
+  };
+}
 
 // Stat card component
 function StatCard({
@@ -91,20 +104,47 @@ function getDaysUntil(dateString: string | null): { text: string; urgent: boolea
 }
 
 export default function Home() {
-  const { opportunities, total, fetchOpportunities, isLoading: oppsLoading } = useOpportunitiesStore();
+  const { opportunities, fetchOpportunities, isLoading: oppsLoading } = useOpportunitiesStore();
   const { alertProfiles, fetchAlertProfiles } = useAlertsStore();
+  const { isAuthenticated } = useAuthStore();
+  const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
+  const navigate = useNavigate();
+
+  // Check if user needs to complete company onboarding
+  useEffect(() => {
+    if (isAuthenticated) {
+      getOnboardingStatus()
+        .then((status) => {
+          // Redirect to onboarding if not completed and not skipped (-1)
+          if (!status.onboarding_completed && status.onboarding_step !== -1) {
+            navigate('/company-setup');
+          }
+        })
+        .catch(() => {
+          // New user without profile, redirect to onboarding
+          navigate('/company-setup');
+        });
+    }
+  }, [isAuthenticated, navigate]);
 
   useEffect(() => {
     fetchOpportunities();
     fetchAlertProfiles();
+
+    // Fetch dashboard stats from opportunities stats endpoint
+    // Note: apiClient.baseURL already includes /api/v1
+    apiClient.get<DashboardStats>("/opportunities/stats")
+      .then(response => setDashboardStats(response.data))
+      .catch(err => console.error("Failed to fetch dashboard stats:", err));
   }, []);
 
   // Get high-score opportunities
   const highScoreOpps = opportunities.filter(opp => opp.likelihood_score >= 70).slice(0, 5);
 
-  // Get upcoming deadlines
+  // Get upcoming deadlines (only future deadlines, not expired)
+  const now = new Date();
   const upcomingDeadlines = opportunities
-    .filter(opp => opp.response_deadline)
+    .filter(opp => opp.response_deadline && new Date(opp.response_deadline) > now)
     .sort((a, b) => new Date(a.response_deadline!).getTime() - new Date(b.response_deadline!).getTime())
     .slice(0, 5);
 
@@ -132,7 +172,7 @@ export default function Home() {
       <div className="grid grid-cols-1 gap-6 mb-8 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="Total Opportunities"
-          value={total}
+          value={dashboardStats?.total_active ?? 0}
           icon={
             <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -141,7 +181,7 @@ export default function Home() {
         />
         <StatCard
           title="High Score (70+)"
-          value={opportunities.filter(o => o.likelihood_score >= 70).length}
+          value={dashboardStats?.score_distribution?.high ?? 0}
           icon={
             <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
@@ -158,11 +198,11 @@ export default function Home() {
           }
         />
         <StatCard
-          title="Saved Opportunities"
-          value={0}
+          title="New Today"
+          value={dashboardStats?.new_today ?? 0}
           icon={
             <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           }
         />

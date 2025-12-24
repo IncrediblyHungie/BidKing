@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { opportunitiesApi } from "../../api";
+import { supabase } from "../../lib/supabase";
 import { SavedOpportunity, PipelineStatus, SavedOpportunityUpdate } from "../../types";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
@@ -68,10 +69,12 @@ function OpportunityCard({
   saved,
   onMoveStage,
   onEdit,
+  onDelete,
 }: {
   saved: SavedOpportunity;
   onMoveStage: (savedId: string, newStatus: PipelineStatus) => void;
   onEdit: (saved: SavedOpportunity) => void;
+  onDelete: (savedId: string) => void;
 }) {
   const opp = saved.opportunity;
   const deadline = getDaysUntil(opp.response_deadline);
@@ -123,12 +126,20 @@ function OpportunityCard({
           ))}
           <option value="archived">→ Archive</option>
         </select>
-        <button
-          onClick={() => onEdit(saved)}
-          className="text-xs text-brand-500 hover:text-brand-600"
-        >
-          Edit
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => onEdit(saved)}
+            className="text-xs text-brand-500 hover:text-brand-600"
+          >
+            Edit
+          </button>
+          <button
+            onClick={() => onDelete(saved.id)}
+            className="text-xs text-red-500 hover:text-red-600"
+          >
+            Delete
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -289,6 +300,52 @@ export default function PipelinePage() {
     }
   };
 
+  const handleDelete = async (savedId: string) => {
+    if (!window.confirm("Are you sure you want to delete this opportunity from your pipeline? This cannot be undone.")) {
+      return;
+    }
+    try {
+      await opportunitiesApi.unsave(savedId);
+      setSavedOpportunities((prev) => prev.filter((item) => item.id !== savedId));
+    } catch (err: any) {
+      setError(err.response?.data?.detail || "Failed to delete");
+    }
+  };
+
+  const handleExportCSV = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        setError("You must be logged in to export pipeline data");
+        return;
+      }
+
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL || "https://api.bidking.ai"}/api/v1/opportunities/saved/export/csv`,
+        {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        }
+      );
+
+      if (!response.ok) throw new Error("Export failed");
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `bidking_pipeline_${new Date().toISOString().split("T")[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error("Export error:", err);
+      setError("Failed to export CSV");
+    }
+  };
+
   // Group by status for kanban view
   const groupedByStatus = PIPELINE_STAGES.reduce((acc, stage) => {
     acc[stage.key] = savedOpportunities.filter(
@@ -341,6 +398,15 @@ export default function PipelinePage() {
             Drag opportunities between stages or use the dropdown to move them.
           </p>
           <div className="flex gap-2">
+            <button
+              onClick={handleExportCSV}
+              className="px-3 py-1 text-sm rounded bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 flex items-center gap-1"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Export CSV
+            </button>
             <button
               onClick={() => setViewMode("kanban")}
               className={`px-3 py-1 text-sm rounded ${
@@ -417,6 +483,7 @@ export default function PipelinePage() {
                       saved={saved}
                       onMoveStage={handleMoveStage}
                       onEdit={setEditingItem}
+                      onDelete={handleDelete}
                     />
                   ))}
                   {groupedByStatus[stage.key]?.length === 0 && (
@@ -488,12 +555,20 @@ export default function PipelinePage() {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <button
-                          onClick={() => setEditingItem(saved)}
-                          className="text-sm text-brand-500 hover:text-brand-600"
-                        >
-                          Edit
-                        </button>
+                        <div className="flex gap-3">
+                          <button
+                            onClick={() => setEditingItem(saved)}
+                            className="text-sm text-brand-500 hover:text-brand-600"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDelete(saved.id)}
+                            className="text-sm text-red-500 hover:text-red-600"
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

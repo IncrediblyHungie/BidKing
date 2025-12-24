@@ -6,7 +6,7 @@ Core user account model with authentication fields.
 
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Boolean, DateTime, Text
+from sqlalchemy import Column, String, Boolean, DateTime, Text, Integer
 from sqlalchemy.orm import relationship
 from app.utils.uuid_type import GUID
 
@@ -52,6 +52,11 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False)
 
+    # Notification Preferences
+    email_reminders_enabled = Column(Boolean, default=True)  # Pipeline reminder emails
+    email_deadline_warnings = Column(Boolean, default=True)  # Deadline warning emails
+    deadline_warning_days = Column(Integer, default=5)  # Days before deadline to warn
+
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -60,6 +65,7 @@ class User(Base):
     subscriptions = relationship("Subscription", back_populates="user", cascade="all, delete-orphan")
     alert_profiles = relationship("AlertProfile", back_populates="user", cascade="all, delete-orphan")
     alerts_sent = relationship("AlertSent", back_populates="user", cascade="all, delete-orphan")
+    company_profile = relationship("CompanyProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User {self.email}>"

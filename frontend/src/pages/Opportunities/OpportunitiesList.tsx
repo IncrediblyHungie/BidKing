@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Link } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
@@ -7,6 +7,9 @@ import Label from "../../components/form/Label";
 import Button from "../../components/ui/button/Button";
 import SearchableSelect from "../../components/form/SearchableSelect";
 import { Opportunity } from "../../types";
+import { useAuthStore } from "../../stores/authStore";
+import { opportunitiesApi, OpportunityScore } from "../../api/opportunities";
+import { getScoresUpdatedTimestamp, clearScoresUpdatedFlag } from "../../stores/companyStore";
 
 interface FilterStats {
   total_active: number;
@@ -17,7 +20,7 @@ interface FilterStats {
 }
 
 // Score badge component
-function ScoreBadge({ score }: { score: number }) {
+function ScoreBadge({ score, label }: { score: number; label?: string }) {
   const getScoreColor = () => {
     if (score >= 70) return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400";
     if (score >= 40) return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400";
@@ -25,6 +28,7 @@ function ScoreBadge({ score }: { score: number }) {
   };
 
   const getScoreLabel = () => {
+    if (label) return label;
     if (score >= 70) return "High";
     if (score >= 40) return "Medium";
     return "Low";
@@ -35,6 +39,61 @@ function ScoreBadge({ score }: { score: number }) {
       <span className="font-bold">{score}</span>
       <span className="text-xs opacity-75">{getScoreLabel()}</span>
     </span>
+  );
+}
+
+// Personalized score badge with tooltip
+function PersonalizedScoreBadge({ score }: { score: OpportunityScore }) {
+  const [showTooltip, setShowTooltip] = useState(false);
+
+  return (
+    <div className="relative">
+      <div
+        onMouseEnter={() => setShowTooltip(true)}
+        onMouseLeave={() => setShowTooltip(false)}
+        className="cursor-help"
+      >
+        <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400">
+          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+          </svg>
+          <span className="font-bold">{score.overall_score}</span>
+          <span className="text-xs opacity-75">Your Fit</span>
+        </span>
+      </div>
+
+      {showTooltip && (
+        <div className="absolute z-50 p-3 text-xs bg-white border rounded-lg shadow-lg dark:bg-gray-800 dark:border-gray-700 w-56 -left-20 top-8">
+          <div className="font-medium mb-2 text-gray-900 dark:text-white">Score Breakdown</div>
+          <div className="space-y-1.5">
+            <div className="flex justify-between">
+              <span className="text-gray-600 dark:text-gray-400">NAICS Match</span>
+              <span className="font-medium">{score.capability_score}%</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600 dark:text-gray-400">Set-Aside Eligibility</span>
+              <span className="font-medium">{score.eligibility_score}%</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600 dark:text-gray-400">Scale Fit</span>
+              <span className="font-medium">{score.scale_score}%</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600 dark:text-gray-400">Clearance</span>
+              <span className="font-medium">{score.clearance_score}%</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600 dark:text-gray-400">Contract Type</span>
+              <span className="font-medium">{score.contract_type_score}%</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600 dark:text-gray-400">Timeline</span>
+              <span className="font-medium">{score.timeline_score}%</span>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -105,6 +164,9 @@ function SortableHeader({
 }
 
 export default function OpportunitiesList() {
+  // Auth state for personalized scoring
+  const { isAuthenticated } = useAuthStore();
+
   // Use direct fetch instead of Zustand store (same pattern as Recompetes)
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -120,6 +182,12 @@ export default function OpportunitiesList() {
   const [agencyFilter, setAgencyFilter] = useState("");
   const [setAsideFilter, setSetAsideFilter] = useState("");
   const [stateFilter, setStateFilter] = useState("");
+  const [minValue, setMinValue] = useState("");
+  const [maxValue, setMaxValue] = useState("");
+  const [hasValueEstimate, setHasValueEstimate] = useState<"all" | "yes" | "no">("all");
+
+  // Personalized scores state
+  const [personalizedScores, setPersonalizedScores] = useState<Record<string, OpportunityScore>>({});
 
   // Sort state
   const [currentSort, setCurrentSort] = useState("response_deadline");
@@ -140,9 +208,13 @@ export default function OpportunitiesList() {
       if (naicsFilter) params.append("naics_codes", naicsFilter);
       if (stateFilter) params.append("states", stateFilter);
       if (setAsideFilter) params.append("set_aside_types", setAsideFilter);
+      if (minValue) params.append("min_value", minValue);
+      if (maxValue) params.append("max_value", maxValue);
+      if (hasValueEstimate === "yes") params.append("has_value_estimate", "true");
+      if (hasValueEstimate === "no") params.append("has_value_estimate", "false");
 
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL || "https://bidking-api.fly.dev/api/v1"}/opportunities?${params}`
+        `${import.meta.env.VITE_API_URL || "https://api.bidking.ai/api/v1"}/opportunities?${params}`
       );
 
       if (!response.ok) {
@@ -158,12 +230,62 @@ export default function OpportunitiesList() {
     } finally {
       setIsLoading(false);
     }
-  }, [page, pageSize, currentSort, currentOrder, searchInput, naicsFilter, stateFilter, setAsideFilter]);
+  }, [page, pageSize, currentSort, currentOrder, searchInput, naicsFilter, stateFilter, setAsideFilter, minValue, maxValue, hasValueEstimate]);
+
+  // Fetch personalized scores for authenticated users
+  const fetchPersonalizedScores = useCallback(async (opportunityIds: string[]) => {
+    if (!isAuthenticated || opportunityIds.length === 0) return;
+
+    try {
+      const response = await opportunitiesApi.getScores({
+        opportunity_ids: opportunityIds,
+        page_size: 100,
+      });
+
+      // Merge new scores with existing ones (keep scores from other pages)
+      setPersonalizedScores(prev => {
+        const merged = { ...prev };
+        response.items.forEach((score) => {
+          merged[score.opportunity_id] = score;
+        });
+        return merged;
+      });
+    } catch (err) {
+      // Silently fail - personalized scores are optional
+      console.debug("Could not fetch personalized scores:", err);
+    }
+  }, [isAuthenticated]);
 
   useEffect(() => {
     fetchOpportunities();
     fetchFilterStats();
   }, [fetchOpportunities]);
+
+  // Track when scores were last fetched and for which opportunity IDs
+  const lastScoreFetchRef = useRef<number>(0);
+  const lastFetchedIdsRef = useRef<string>("");
+
+  // Fetch personalized scores when opportunities load or when page changes
+  useEffect(() => {
+    if (opportunities.length > 0 && isAuthenticated) {
+      const ids = opportunities.map((opp) => opp.id);
+      const idsKey = ids.join(",");
+      const scoresUpdatedAt = getScoresUpdatedTimestamp();
+      const needsRefresh = scoresUpdatedAt > lastScoreFetchRef.current;
+      const pageChanged = idsKey !== lastFetchedIdsRef.current;
+
+      // Fetch if: scores were updated, page changed, or first load
+      if (needsRefresh || pageChanged) {
+        console.log('[Scores] Fetching personalized scores for page...');
+        fetchPersonalizedScores(ids);
+        lastScoreFetchRef.current = Date.now();
+        lastFetchedIdsRef.current = idsKey;
+        if (needsRefresh) {
+          clearScoresUpdatedFlag();
+        }
+      }
+    }
+  }, [opportunities, isAuthenticated, fetchPersonalizedScores]);
 
   // Handle column sort
   const handleColumnSort = (column: string) => {
@@ -172,10 +294,27 @@ export default function OpportunitiesList() {
     setCurrentOrder(newOrder);
   };
 
+  // Get sorted opportunities - client-side sort for personalized scores when authenticated
+  const getSortedOpportunities = useCallback(() => {
+    // Only do client-side sorting for score column when we have personalized scores
+    if (currentSort === "likelihood_score" && isAuthenticated && Object.keys(personalizedScores).length > 0) {
+      const sorted = [...opportunities].sort((a, b) => {
+        const scoreA = personalizedScores[a.id]?.overall_score ?? a.likelihood_score;
+        const scoreB = personalizedScores[b.id]?.overall_score ?? b.likelihood_score;
+        return currentOrder === "asc" ? scoreA - scoreB : scoreB - scoreA;
+      });
+      return sorted;
+    }
+    // For all other columns, rely on server-side sorting
+    return opportunities;
+  }, [opportunities, currentSort, currentOrder, isAuthenticated, personalizedScores]);
+
+  const sortedOpportunities = getSortedOpportunities();
+
   const fetchFilterStats = async () => {
     try {
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL || "https://bidking-api.fly.dev/api/v1"}/opportunities/stats`
+        `${import.meta.env.VITE_API_URL || "https://api.bidking.ai/api/v1"}/opportunities/stats`
       );
       if (response.ok) {
         const data = await response.json();
@@ -198,7 +337,43 @@ export default function OpportunitiesList() {
     setAgencyFilter("");
     setSetAsideFilter("");
     setStateFilter("");
+    setMinValue("");
+    setMaxValue("");
+    setHasValueEstimate("all");
     setPage(1);
+  };
+
+  const handleExportCSV = async () => {
+    try {
+      const params = new URLSearchParams();
+      if (searchInput) params.append("query", searchInput);
+      if (naicsFilter) params.append("naics_codes", naicsFilter);
+      if (stateFilter) params.append("states", stateFilter);
+      if (setAsideFilter) params.append("set_aside_types", setAsideFilter);
+      if (minValue) params.append("min_value", minValue);
+      if (maxValue) params.append("max_value", maxValue);
+      if (hasValueEstimate === "yes") params.append("has_value_estimate", "true");
+      if (hasValueEstimate === "no") params.append("has_value_estimate", "false");
+
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL || "https://api.bidking.ai/api/v1"}/opportunities/export/csv?${params}`
+      );
+
+      if (!response.ok) throw new Error("Export failed");
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `bidking_opportunities_${new Date().toISOString().split("T")[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      console.error("Export error:", err);
+      alert("Failed to export CSV");
+    }
   };
 
   const activeFilterCount = [
@@ -207,6 +382,9 @@ export default function OpportunitiesList() {
     agencyFilter,
     setAsideFilter,
     stateFilter,
+    minValue,
+    maxValue,
+    hasValueEstimate !== "all" ? "hasValue" : "",
   ].filter(Boolean).length;
 
   const totalPages = Math.ceil(total / pageSize);
@@ -277,6 +455,12 @@ export default function OpportunitiesList() {
                     Clear All
                   </Button>
                 )}
+                <Button type="button" size="sm" variant="outline" onClick={handleExportCSV}>
+                  <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Export CSV
+                </Button>
               </div>
             </div>
 
@@ -359,6 +543,40 @@ export default function OpportunitiesList() {
                   </div>
                 </div>
 
+                {/* AI Estimated Value Filters */}
+                <div className="grid grid-cols-1 gap-4 mt-4 md:grid-cols-3">
+                  <div>
+                    <Label>Min Estimated Value ($)</Label>
+                    <Input
+                      type="number"
+                      placeholder="e.g., 50000"
+                      value={minValue}
+                      onChange={(e) => setMinValue(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label>Max Estimated Value ($)</Label>
+                    <Input
+                      type="number"
+                      placeholder="e.g., 500000"
+                      value={maxValue}
+                      onChange={(e) => setMaxValue(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label>Has Value Estimate</Label>
+                    <select
+                      value={hasValueEstimate}
+                      onChange={(e) => setHasValueEstimate(e.target.value as "all" | "yes" | "no")}
+                      className="w-full h-11 px-4 py-2.5 text-sm bg-transparent border border-gray-300 rounded-lg appearance-none dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
+                    >
+                      <option value="all">All Opportunities</option>
+                      <option value="yes">With AI Estimate Only</option>
+                      <option value="no">Without AI Estimate</option>
+                    </select>
+                  </div>
+                </div>
+
                 {/* Stats Summary */}
                 {filterStats && (
                   <div className="flex flex-wrap items-center gap-4 pt-4 mt-4 border-t border-gray-100 dark:border-gray-700">
@@ -431,7 +649,7 @@ export default function OpportunitiesList() {
                     />
                     <SortableHeader
                       column="likelihood_score"
-                      label="Score"
+                      label={isAuthenticated ? "Your Fit" : "Score"}
                       currentSort={currentSort}
                       currentOrder={currentOrder}
                       onSort={handleColumnSort}
@@ -449,14 +667,14 @@ export default function OpportunitiesList() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                  {opportunities.length === 0 ? (
+                  {sortedOpportunities.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
                         No opportunities found. Try adjusting your search filters.
                       </td>
                     </tr>
                   ) : (
-                    opportunities.map((opp) => (
+                    sortedOpportunities.map((opp) => (
                       <tr key={opp.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
                         <td className="px-6 py-4">
                           <div className="max-w-md">
@@ -497,7 +715,12 @@ export default function OpportunitiesList() {
                           )}
                         </td>
                         <td className="px-6 py-4">
-                          <ScoreBadge score={opp.likelihood_score} />
+                          {/* Show personalized score if available, otherwise show generic */}
+                          {isAuthenticated && personalizedScores[opp.id] ? (
+                            <PersonalizedScoreBadge score={personalizedScores[opp.id]} />
+                          ) : (
+                            <ScoreBadge score={opp.likelihood_score} />
+                          )}
                         </td>
                         <td className="px-6 py-4">
                           <div className="text-sm text-gray-900 dark:text-white">

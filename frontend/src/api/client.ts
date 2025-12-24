@@ -15,6 +15,10 @@ export const apiClient = axios.create({
     'Content-Type': 'application/json',
   },
   timeout: 30000,
+  // FastAPI expects array params as ?key=val1&key=val2 not ?key[]=val1&key[]=val2
+  paramsSerializer: {
+    indexes: null, // This tells axios to serialize arrays as repeated keys
+  },
 });
 
 // Request interceptor - add Supabase auth token (if available)

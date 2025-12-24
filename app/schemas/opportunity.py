@@ -34,6 +34,18 @@ class OpportunityAttachmentResponse(BaseModel):
     file_size: Optional[int] = None
     posted_date: Optional[datetime] = None
 
+    # Text extraction fields
+    text_content: Optional[str] = None
+    extraction_status: Optional[str] = None
+    extracted_at: Optional[datetime] = None
+    extraction_error: Optional[str] = None
+
+    # AI summarization fields
+    ai_summary: Optional[dict] = None
+    ai_summary_status: Optional[str] = None
+    ai_summarized_at: Optional[datetime] = None
+    ai_summary_error: Optional[str] = None
+
     class Config:
         from_attributes = True
 
@@ -105,6 +117,11 @@ class OpportunityResponse(BaseModel):
     award_date: Optional[date] = None
     awardee_name: Optional[str] = None
     awardee_uei: Optional[str] = None
+
+    # AI Estimated Value
+    ai_estimated_value_low: Optional[Decimal] = None
+    ai_estimated_value_high: Optional[Decimal] = None
+    ai_estimated_value_basis: Optional[str] = None
 
     # Scoring
     likelihood_score: int = 50

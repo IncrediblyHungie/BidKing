@@ -96,6 +96,53 @@ export const opportunitiesApi = {
     const response = await apiClient.get('/opportunities/saved/stats');
     return response.data;
   },
+
+  /**
+   * Get personalized scores for opportunities
+   */
+  getScores: async (params?: {
+    opportunity_ids?: string[];
+    page?: number;
+    page_size?: number;
+  }): Promise<{
+    items: OpportunityScore[];
+    total: number;
+    page: number;
+    page_size: number;
+  }> => {
+    const response = await apiClient.get('/opportunities/scores', { params });
+    return response.data;
+  },
+
+  /**
+   * Get personalized score for a single opportunity
+   */
+  getScore: async (opportunityId: string): Promise<OpportunityScore | { has_score: false; message: string }> => {
+    const response = await apiClient.get(`/opportunities/scores/${opportunityId}`);
+    return response.data;
+  },
 };
+
+// Types for scoring
+export interface OpportunityScore {
+  opportunity_id: string;
+  has_score?: boolean;
+  overall_score: number;
+  capability_score: number;
+  capability_breakdown: Record<string, unknown>;
+  eligibility_score: number;
+  eligibility_breakdown: Record<string, unknown>;
+  scale_score: number;
+  scale_breakdown: Record<string, unknown>;
+  clearance_score: number;
+  clearance_breakdown: Record<string, unknown>;
+  contract_type_score: number;
+  contract_type_breakdown: Record<string, unknown>;
+  timeline_score: number;
+  timeline_breakdown: Record<string, unknown>;
+  is_stale?: boolean;
+  stale_reason?: string;
+  calculated_at?: string;
+}
 
 export default opportunitiesApi;

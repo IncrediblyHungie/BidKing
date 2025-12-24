@@ -13,7 +13,7 @@ from celery import shared_task
 import resend
 
 from app.database import SessionLocal
-from app.models import User, AlertProfile, Opportunity, AlertSent
+from app.models import User, AlertProfile, Opportunity, AlertSent, SavedOpportunity
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -239,6 +239,161 @@ def _build_subject(profile_name: str, alert_type: str, count: int) -> str:
     elif alert_type == "weekly_digest":
         return f"[BidKing] Weekly Digest: {count} opportunities for '{profile_name}'"
     return f"[BidKing] {count} opportunities found"
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=60)
+def send_reminder_email(self, user_id: str, saved_opportunity_id: str, reminder_type: str = "custom"):
+    """
+    Send reminder email for a saved/pipeline opportunity.
+
+    Args:
+        user_id: User UUID
+        saved_opportunity_id: SavedOpportunity UUID
+        reminder_type: "custom" (user-set date) or "deadline" (response deadline warning)
+    """
+    logger.info(f"Sending {reminder_type} reminder to user {user_id}")
+
+    with SessionLocal() as db:
+        user = db.query(User).filter(User.id == UUID(user_id)).first()
+        saved_opp = db.query(SavedOpportunity).filter(
+            SavedOpportunity.id == UUID(saved_opportunity_id)
+        ).first()
+
+        if not user or not saved_opp:
+            logger.error(f"Missing data for reminder: user={user}, saved_opp={saved_opp}")
+            return {"error": "Missing data"}
+
+        opportunity = saved_opp.opportunity
+        if not opportunity:
+            logger.error(f"Opportunity not found for saved_opp {saved_opportunity_id}")
+            return {"error": "Opportunity not found"}
+
+        # Build email content
+        if reminder_type == "deadline":
+            subject = f"[BidKing] Deadline in {_days_until(opportunity.response_deadline)} days: {opportunity.title[:50]}"
+            email_heading = "Deadline Reminder"
+            urgency_text = f"The response deadline for this opportunity is in <strong>{_days_until(opportunity.response_deadline)} days</strong>."
+        else:
+            subject = f"[BidKing] Reminder: {opportunity.title[:50]}"
+            email_heading = "Opportunity Reminder"
+            urgency_text = "You set a reminder for this opportunity."
+
+        deadline_str = opportunity.response_deadline.strftime("%B %d, %Y at %I:%M %p") if opportunity.response_deadline else "Not specified"
+        status_color = _get_status_color(saved_opp.status)
+
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; background: #f9fafb; }}
+                .container {{ max-width: 600px; margin: 0 auto; background: white; }}
+                .header {{ background: #1a56db; color: white; padding: 20px; text-align: center; }}
+                .content {{ padding: 20px; }}
+                .opp-card {{ border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin: 16px 0; }}
+                .button {{ display: inline-block; background: #1a56db; color: white; padding: 12px 24px;
+                           text-decoration: none; border-radius: 4px; margin: 10px 5px 10px 0; }}
+                .button-secondary {{ background: #6b7280; }}
+                .footer {{ text-align: center; padding: 20px; color: #666; font-size: 12px; background: #f3f4f6; }}
+                .status-badge {{ display: inline-block; background: {status_color}; color: white; padding: 4px 12px;
+                                 border-radius: 4px; font-size: 12px; text-transform: uppercase; }}
+                .meta {{ color: #6b7280; font-size: 14px; margin: 8px 0; }}
+                .urgency {{ background: #fef3c7; border-left: 4px solid #f59e0b; padding: 12px; margin: 16px 0; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1 style="margin: 0;">{email_heading}</h1>
+                </div>
+                <div class="content">
+                    <div class="urgency">
+                        {urgency_text}
+                    </div>
+
+                    <div class="opp-card">
+                        <span class="status-badge">{saved_opp.status}</span>
+                        <h2 style="margin: 12px 0 8px 0; color: #1a56db;">
+                            {opportunity.title}
+                        </h2>
+                        <p class="meta">
+                            <strong>Agency:</strong> {opportunity.agency_name or 'N/A'}<br>
+                            <strong>NAICS:</strong> {opportunity.naics_code or 'N/A'}<br>
+                            <strong>Deadline:</strong> {deadline_str}<br>
+                            <strong>Notice ID:</strong> {opportunity.notice_id}
+                        </p>
+                        {f'<p><strong>Your Notes:</strong> {saved_opp.notes}</p>' if saved_opp.notes else ''}
+                    </div>
+
+                    <p>
+                        <a href="{settings.frontend_url}/pipeline" class="button">
+                            View in Pipeline
+                        </a>
+                        <a href="{opportunity.ui_link or opportunity.sam_gov_link}" class="button button-secondary">
+                            View on SAM.gov
+                        </a>
+                    </p>
+                </div>
+                <div class="footer">
+                    <p>
+                        <a href="{settings.frontend_url}/settings">Manage Notification Settings</a> |
+                        <a href="{settings.frontend_url}/unsubscribe">Unsubscribe</a>
+                    </p>
+                    <p>BidKing - Find Your Next Federal Contract</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+
+        try:
+            params = {
+                "from": f"BidKing Reminders <reminders@{settings.email_domain}>",
+                "to": [user.email],
+                "subject": subject,
+                "html": html_content,
+            }
+
+            response = resend.Emails.send(params)
+            logger.info(f"Reminder email sent: {response}")
+
+            # Mark reminder as sent
+            if reminder_type == "deadline":
+                saved_opp.deadline_reminder_sent = True
+            else:
+                saved_opp.reminder_sent = True
+            db.commit()
+
+            return {"status": "sent", "message_id": response.get("id")}
+
+        except Exception as e:
+            logger.error(f"Failed to send reminder email: {e}")
+            raise self.retry(exc=e)
+
+
+def _days_until(deadline) -> int:
+    """Calculate days until deadline."""
+    if not deadline:
+        return 0
+    from datetime import date
+    if hasattr(deadline, 'date'):
+        deadline = deadline.date()
+    today = date.today()
+    return max(0, (deadline - today).days)
+
+
+def _get_status_color(status: str) -> str:
+    """Get color for pipeline status."""
+    colors = {
+        "watching": "#3b82f6",  # blue
+        "researching": "#8b5cf6",  # purple
+        "preparing": "#f59e0b",  # amber
+        "submitted": "#10b981",  # green
+        "won": "#22c55e",  # green
+        "lost": "#ef4444",  # red
+        "archived": "#6b7280",  # gray
+    }
+    return colors.get(status, "#6b7280")
 
 
 def _build_html_content(

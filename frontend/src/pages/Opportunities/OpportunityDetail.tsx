@@ -1,10 +1,33 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router";
 import { useOpportunitiesStore } from "../../stores/opportunitiesStore";
+import { useAuthStore } from "../../stores/authStore";
+import { opportunitiesApi, OpportunityScore } from "../../api/opportunities";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
 import Button from "../../components/ui/button/Button";
 import toast from "react-hot-toast";
+
+// AI Summary type definition
+interface AISummary {
+  summary?: string;
+  period_of_performance?: string;
+  contract_type?: string;
+  clearance_required?: string;
+  labor_categories?: Array<{ title: string; quantity?: number; level?: string }>;
+  technologies?: string[];
+  certifications_required?: string[];
+  set_aside_info?: string;
+  location?: string;
+  incumbent?: string;
+  estimated_value?: { low?: number; high?: number; basis?: string };
+  key_dates?: { proposal_due?: string; questions_due?: string; anticipated_start?: string };
+  evaluation_factors?: string[];
+  naics_code?: string;
+  contract_number?: string;
+  source_documents?: string[];
+  status?: string;
+}
 
 // Score badge component
 function ScoreBadge({ score }: { score: number }) {
@@ -24,6 +47,57 @@ function ScoreBadge({ score }: { score: number }) {
     <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg ${getScoreColor()}`}>
       <span className="text-2xl font-bold">{score}</span>
       <span className="text-sm">{getScoreLabel()}</span>
+    </div>
+  );
+}
+
+// Personalized Score Card component
+function PersonalizedScoreCard({ score }: { score: OpportunityScore }) {
+  const getScoreColor = (s: number) => {
+    if (s >= 70) return "text-green-600 dark:text-green-400";
+    if (s >= 40) return "text-yellow-600 dark:text-yellow-400";
+    return "text-red-600 dark:text-red-400";
+  };
+
+  return (
+    <div className="p-4 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg">
+      <div className="flex items-center gap-3 mb-3">
+        <div className="flex items-center justify-center w-12 h-12 bg-purple-100 dark:bg-purple-900/40 rounded-full">
+          <span className={`text-2xl font-bold ${getScoreColor(score.overall_score)}`}>
+            {score.overall_score}
+          </span>
+        </div>
+        <div>
+          <div className="font-semibold text-purple-900 dark:text-purple-100">Your Fit Score</div>
+          <div className="text-sm text-purple-700 dark:text-purple-300">Based on your company profile</div>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-sm">
+        <div className="flex justify-between">
+          <span className="text-purple-700 dark:text-purple-300">NAICS Match</span>
+          <span className={`font-medium ${getScoreColor(score.capability_score)}`}>{score.capability_score}%</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-purple-700 dark:text-purple-300">Eligibility</span>
+          <span className={`font-medium ${getScoreColor(score.eligibility_score)}`}>{score.eligibility_score}%</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-purple-700 dark:text-purple-300">Scale Fit</span>
+          <span className={`font-medium ${getScoreColor(score.scale_score)}`}>{score.scale_score}%</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-purple-700 dark:text-purple-300">Clearance</span>
+          <span className={`font-medium ${getScoreColor(score.clearance_score)}`}>{score.clearance_score}%</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-purple-700 dark:text-purple-300">Contract Type</span>
+          <span className={`font-medium ${getScoreColor(score.contract_type_score)}`}>{score.contract_type_score}%</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-purple-700 dark:text-purple-300">Timeline</span>
+          <span className={`font-medium ${getScoreColor(score.timeline_score)}`}>{score.timeline_score}%</span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -121,13 +195,64 @@ function InfoRow({ label, value, className = "" }: { label: string; value: React
 export default function OpportunityDetail() {
   const { id } = useParams<{ id: string }>();
   const { selectedOpportunity, isLoading, error, fetchOpportunity, saveOpportunity } = useOpportunitiesStore();
+  const { isAuthenticated } = useAuthStore();
   const [isSaving, setIsSaving] = useState(false);
+  const [personalizedScore, setPersonalizedScore] = useState<OpportunityScore | null>(null);
+  const [aiSummary, setAiSummary] = useState<AISummary | null>(null);
+  const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
 
   useEffect(() => {
     if (id) {
       fetchOpportunity(id);
     }
   }, [id]);
+
+  // Fetch AI summary
+  useEffect(() => {
+    const fetchAiSummary = async () => {
+      if (!id) return;
+      setAiSummaryLoading(true);
+      try {
+        const apiUrl = import.meta.env.VITE_API_URL || 'https://api.bidking.ai/api/v1';
+        const response = await fetch(`${apiUrl}/opportunities/${id}/ai-summary`);
+        if (response.ok) {
+          const data = await response.json();
+          // API returns { has_summary: true, summary: {...} }
+          if (data && data.has_summary && data.summary) {
+            setAiSummary(data.summary);
+          }
+        }
+      } catch (err) {
+        console.debug("Could not fetch AI summary:", err);
+      } finally {
+        setAiSummaryLoading(false);
+      }
+    };
+
+    fetchAiSummary();
+  }, [id]);
+
+  // Fetch personalized score for authenticated users
+  useEffect(() => {
+    const fetchPersonalizedScore = async () => {
+      if (!id || !isAuthenticated) return;
+
+      try {
+        const scoreResponse = await opportunitiesApi.getScore(id);
+        if ('has_score' in scoreResponse && scoreResponse.has_score === false) {
+          // No score available
+          setPersonalizedScore(null);
+        } else {
+          setPersonalizedScore(scoreResponse as OpportunityScore);
+        }
+      } catch (err) {
+        // Silently fail - personalized scores are optional
+        console.debug("Could not fetch personalized score:", err);
+      }
+    };
+
+    fetchPersonalizedScore();
+  }, [id, isAuthenticated]);
 
   const handleSave = async () => {
     if (!id) return;
@@ -214,7 +339,17 @@ export default function OpportunityDetail() {
               </div>
             </div>
             <div className="flex flex-col gap-3">
-              <ScoreBadge score={opp.likelihood_score} />
+              {/* Show personalized score card if available */}
+              {personalizedScore && (
+                <PersonalizedScoreCard score={personalizedScore} />
+              )}
+              {/* Generic score badge */}
+              <div>
+                <div className="text-xs text-gray-500 mb-1">
+                  {personalizedScore ? "Generic Score" : "Likelihood Score"}
+                </div>
+                <ScoreBadge score={opp.likelihood_score} />
+              </div>
               <div className="flex gap-2">
                 <Button size="sm" onClick={handleSave} disabled={isSaving}>
                   {isSaving ? "Saving..." : "Save to Pipeline"}
@@ -295,12 +430,179 @@ export default function OpportunityDetail() {
           <SectionHeader title="Description" icon="📋" />
           <div className="prose prose-sm max-w-none dark:prose-invert">
             {opp.description ? (
-              <p className="whitespace-pre-wrap text-gray-700 dark:text-gray-300">{opp.description}</p>
+              opp.description.startsWith("http") ? (
+                <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                  <p className="text-gray-600 dark:text-gray-400 mb-3">
+                    Full description available on SAM.gov
+                  </p>
+                  <a
+                    href={opp.ui_link || `https://sam.gov/opp/${opp.notice_id}/view`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                    View Full Description on SAM.gov
+                  </a>
+                </div>
+              ) : (
+                <p className="whitespace-pre-wrap text-gray-700 dark:text-gray-300">{opp.description}</p>
+              )
             ) : (
               <p className="text-gray-500 italic">No description available</p>
             )}
           </div>
         </div>
+
+        {/* AI Summary Section */}
+        {(aiSummary || aiSummaryLoading) && (
+          <div className="p-6 bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 rounded-lg shadow border border-purple-100 dark:border-purple-800">
+            <SectionHeader title="AI Analysis" icon="🤖" />
+
+            {aiSummaryLoading ? (
+              <div className="flex items-center gap-3 text-gray-500">
+                <div className="w-5 h-5 border-2 border-purple-500 rounded-full animate-spin border-t-transparent"></div>
+                <span>Analyzing PDF attachments...</span>
+              </div>
+            ) : aiSummary ? (
+              <div className="space-y-6">
+                {/* Summary */}
+                {aiSummary.summary && (
+                  <div>
+                    <h4 className="text-sm font-semibold text-purple-800 dark:text-purple-300 mb-2">What They Want</h4>
+                    <p className="text-gray-700 dark:text-gray-300">{aiSummary.summary}</p>
+                  </div>
+                )}
+
+                {/* Key Details Grid */}
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {/* Estimated Value */}
+                  {aiSummary.estimated_value && (aiSummary.estimated_value.low || aiSummary.estimated_value.high) && (
+                    <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-purple-200 dark:border-purple-700">
+                      <div className="text-xs font-medium text-purple-600 dark:text-purple-400 mb-1">💰 Estimated Value</div>
+                      <div className="text-lg font-bold text-gray-900 dark:text-white">
+                        {aiSummary.estimated_value.low && aiSummary.estimated_value.high
+                          ? `${formatCurrency(aiSummary.estimated_value.low)} - ${formatCurrency(aiSummary.estimated_value.high)}`
+                          : formatCurrency(aiSummary.estimated_value.low || aiSummary.estimated_value.high)
+                        }
+                      </div>
+                      {aiSummary.estimated_value.basis && (
+                        <div className="text-xs text-gray-500 mt-1">{aiSummary.estimated_value.basis}</div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Period of Performance */}
+                  {aiSummary.period_of_performance && (
+                    <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-purple-200 dark:border-purple-700">
+                      <div className="text-xs font-medium text-purple-600 dark:text-purple-400 mb-1">📅 Period of Performance</div>
+                      <div className="text-gray-900 dark:text-white font-medium">{aiSummary.period_of_performance}</div>
+                    </div>
+                  )}
+
+                  {/* Contract Type */}
+                  {aiSummary.contract_type && (
+                    <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-purple-200 dark:border-purple-700">
+                      <div className="text-xs font-medium text-purple-600 dark:text-purple-400 mb-1">📝 Contract Type</div>
+                      <div className="text-gray-900 dark:text-white font-medium">{aiSummary.contract_type}</div>
+                    </div>
+                  )}
+
+                  {/* Clearance Required */}
+                  {aiSummary.clearance_required && (
+                    <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-purple-200 dark:border-purple-700">
+                      <div className="text-xs font-medium text-purple-600 dark:text-purple-400 mb-1">🔒 Clearance Required</div>
+                      <div className="text-gray-900 dark:text-white font-medium">{aiSummary.clearance_required}</div>
+                    </div>
+                  )}
+
+                  {/* Location */}
+                  {aiSummary.location && (
+                    <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-purple-200 dark:border-purple-700">
+                      <div className="text-xs font-medium text-purple-600 dark:text-purple-400 mb-1">📍 Work Location</div>
+                      <div className="text-gray-900 dark:text-white font-medium">{aiSummary.location}</div>
+                    </div>
+                  )}
+
+                  {/* Incumbent */}
+                  {aiSummary.incumbent && (
+                    <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-purple-200 dark:border-purple-700">
+                      <div className="text-xs font-medium text-purple-600 dark:text-purple-400 mb-1">🏢 Current Incumbent</div>
+                      <div className="text-gray-900 dark:text-white font-medium">{aiSummary.incumbent}</div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Technologies */}
+                {aiSummary.technologies && aiSummary.technologies.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-semibold text-purple-800 dark:text-purple-300 mb-2">💻 Technologies Required</h4>
+                    <div className="flex flex-wrap gap-2">
+                      {aiSummary.technologies.map((tech, i) => (
+                        <span key={i} className="px-3 py-1 bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 rounded-full text-sm">
+                          {tech}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Labor Categories */}
+                {aiSummary.labor_categories && aiSummary.labor_categories.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-semibold text-purple-800 dark:text-purple-300 mb-2">👥 Labor Categories</h4>
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      {aiSummary.labor_categories.map((lc, i) => (
+                        <div key={i} className="p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                          <div className="font-medium text-gray-900 dark:text-white">{lc.title}</div>
+                          <div className="text-sm text-gray-500">
+                            {lc.level && <span className="mr-2">{lc.level}</span>}
+                            {lc.quantity && <span>×{lc.quantity}</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Certifications */}
+                {aiSummary.certifications_required && aiSummary.certifications_required.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-semibold text-purple-800 dark:text-purple-300 mb-2">📜 Certifications Required</h4>
+                    <div className="flex flex-wrap gap-2">
+                      {aiSummary.certifications_required.map((cert, i) => (
+                        <span key={i} className="px-3 py-1 bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300 rounded-full text-sm">
+                          {cert}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Evaluation Factors */}
+                {aiSummary.evaluation_factors && aiSummary.evaluation_factors.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-semibold text-purple-800 dark:text-purple-300 mb-2">⚖️ Evaluation Factors</h4>
+                    <ul className="list-disc list-inside text-gray-700 dark:text-gray-300 space-y-1">
+                      {aiSummary.evaluation_factors.map((factor, i) => (
+                        <li key={i}>{factor}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Source Documents */}
+                {aiSummary.source_documents && aiSummary.source_documents.length > 0 && (
+                  <div className="text-xs text-gray-500 pt-4 border-t border-purple-200 dark:border-purple-700">
+                    <span className="font-medium">Analyzed from:</span> {aiSummary.source_documents.join(", ")}
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </div>
+        )}
 
         {/* Award Information (if awarded) */}
         {(opp.award_number || opp.awardee_name || opp.award_amount) && (
@@ -420,9 +722,9 @@ export default function OpportunityDetail() {
                       {att.posted_date && <span>{formatDate(att.posted_date)}</span>}
                     </div>
                   </div>
-                  {att.url && (
+                  {att.id && (
                     <a
-                      href={att.url}
+                      href={`${import.meta.env.VITE_API_URL || 'https://api.bidking.ai/api/v1'}/opportunities/attachments/${att.id}/download`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="ml-4 px-3 py-1 text-sm text-brand-600 hover:text-brand-700 dark:text-brand-400"

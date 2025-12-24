@@ -332,3 +332,53 @@ class TierRequirement:
 # Tier requirements
 require_starter = TierRequirement("starter")
 require_pro = TierRequirement("pro")
+
+
+async def get_user_from_token(request: Request, db: Session) -> Optional[User]:
+    """
+    Get user from request token without using FastAPI dependencies.
+
+    This is for use in endpoints that need to optionally get the user
+    without using Depends().
+    """
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None
+
+    token = auth_header.split(" ")[1]
+    user_id = None
+    email = None
+
+    # Try Supabase token first
+    payload = decode_supabase_token(token)
+    if payload:
+        user_id = payload.get("sub")
+        email = payload.get("email")
+    else:
+        # Fall back to internal token
+        payload = decode_token(token)
+        if payload and payload.get("type") == "access":
+            user_id = payload.get("sub")
+
+    if not user_id:
+        return None
+
+    # Try to find user
+    user = db.query(User).filter(User.id == UUID(user_id)).first()
+
+    # If not found and we have email from Supabase, create the user
+    if not user and email:
+        user = User(
+            id=UUID(user_id),
+            email=email,
+            password_hash="",
+            is_active=True,
+            email_verified=True,
+            subscription_tier="free",
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        logger.info(f"Created new user from Supabase: {email}")
+
+    return user

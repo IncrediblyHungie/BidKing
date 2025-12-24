@@ -106,6 +106,15 @@ class Opportunity(Base):
     awardee_uei = Column(String(12), nullable=True)
 
     # ==========================================================================
+    # AI Estimated Value (extracted from attachments by Claude)
+    # ==========================================================================
+
+    # Low and high estimates from AI analysis of SOW/RFP documents
+    ai_estimated_value_low = Column(Numeric(15, 2), nullable=True, index=True)
+    ai_estimated_value_high = Column(Numeric(15, 2), nullable=True, index=True)
+    ai_estimated_value_basis = Column(Text, nullable=True)  # Explanation of how value was derived
+
+    # ==========================================================================
     # Scoring (BidKing's unique feature)
     # ==========================================================================
 
@@ -226,6 +235,8 @@ class SavedOpportunity(Base):
 
     # Reminder
     reminder_date = Column(Date, nullable=True)
+    reminder_sent = Column(Boolean, default=False)  # Track if reminder was sent
+    deadline_reminder_sent = Column(Boolean, default=False)  # Track if deadline warning was sent
 
     # Stage changed timestamp (for tracking how long in each stage)
     stage_changed_at = Column(DateTime, default=datetime.utcnow)
@@ -262,6 +273,35 @@ class OpportunityAttachment(Base):
 
     # For searchability - extracted text content
     text_content = Column(Text, nullable=True)
+
+    # Extraction tracking - ensures PDFs are only processed once
+    extraction_status = Column(String(20), default="pending", index=True)
+    # Status: pending (not attempted), extracted (success), failed (error), skipped (not a PDF)
+    extracted_at = Column(DateTime, nullable=True)
+    extraction_error = Column(String(500), nullable=True)  # Error message if failed
+
+    # ==========================================================================
+    # AI Summary (Claude-generated analysis of PDF content)
+    # ==========================================================================
+    ai_summary = Column(JSONDict(), nullable=True)
+    # Contains structured data:
+    # {
+    #   "summary": "2-3 sentence plain English summary",
+    #   "period_of_performance": "1 base + 4 option years",
+    #   "contract_type": "Time & Materials",
+    #   "clearance_required": "Secret",
+    #   "labor_categories": [{"title": "...", "quantity": 2, "level": "Senior"}],
+    #   "technologies": ["Python", "AWS", "PostgreSQL"],
+    #   "certifications_required": ["CMMI Level 3"],
+    #   "location": "Remote with travel to DC",
+    #   "incumbent": "Booz Allen Hamilton",
+    #   "estimated_value": {"low": 500000, "high": 750000, "basis": "..."},
+    #   "key_dates": {"proposal_due": "2025-01-15", "questions_due": "2025-01-05"},
+    # }
+    ai_summary_status = Column(String(20), default="pending", index=True)
+    # Status: pending, summarized, failed, skipped (no text content)
+    ai_summarized_at = Column(DateTime, nullable=True)
+    ai_summary_error = Column(String(500), nullable=True)
 
     # Timestamps
     posted_date = Column(DateTime, nullable=True)
