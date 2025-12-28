@@ -583,7 +583,8 @@ def sync_opportunities_with_full_details(
                         )
 
                 except Exception as e:
-                    logger.warning(f"Error processing opportunity: {e}")
+                    notice_id_for_log = opp.get("notice_id", "UNKNOWN")
+                    logger.warning(f"Error processing opportunity {notice_id_for_log}: {type(e).__name__}: {e}")
                     stats["errors"] += 1
                     continue
 
