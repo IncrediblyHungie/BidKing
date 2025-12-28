@@ -1202,6 +1202,27 @@ def start_scheduler():
         kwargs={"naics_code": "541511", "max_results": 100},
     )
 
+    # Run adjacent/underserved NAICS syncs on startup (staggered after primary)
+    # These are lower competition codes that deserve immediate attention
+    adjacent_naics_startup = [
+        ("541611", 120),  # Management Consulting - 2 min after start
+        ("519190", 150),  # Other Information Services - 2.5 min
+        ("611430", 180),  # Professional Training - 3 min
+        ("541910", 210),  # Marketing Research - 3.5 min
+        ("541618", 240),  # Other Mgmt Consulting - 4 min
+    ]
+
+    for naics_code, delay_secs in adjacent_naics_startup:
+        scheduler.add_job(
+            scraper_sync_job,
+            "date",
+            run_date=datetime.utcnow() + timedelta(seconds=delay_secs),
+            id=f"scraper_sync_startup_{naics_code}",
+            replace_existing=True,
+            name=f"SAM.gov scraper: {naics_code} (startup)",
+            kwargs={"naics_code": naics_code, "max_results": 100},
+        )
+
     scheduler.start()
     logger.info("Scheduler started with jobs:")
     for job in scheduler.get_jobs():

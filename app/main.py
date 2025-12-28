@@ -1126,6 +1126,76 @@ async def run_scheduler_job(
         }
 
 
+@app.post("/admin/reset-failed-attachments")
+async def reset_failed_attachments():
+    """
+    Reset failed attachment extractions to 'pending' so they can be re-processed.
+
+    This is useful after deploying fixes to the extraction code.
+    Returns count of reset attachments.
+    """
+    from app.database import SessionLocal
+    from app.models import OpportunityAttachment
+
+    with SessionLocal() as db:
+        # Count failed attachments
+        failed_count = db.query(OpportunityAttachment).filter(
+            OpportunityAttachment.extraction_status == "failed"
+        ).count()
+
+        # Reset them to pending
+        db.query(OpportunityAttachment).filter(
+            OpportunityAttachment.extraction_status == "failed"
+        ).update({
+            "extraction_status": "pending",
+            "extraction_error": None,
+            "extracted_at": None,
+        })
+
+        db.commit()
+
+        return {
+            "status": "success",
+            "message": f"Reset {failed_count} failed attachments to pending",
+            "reset_count": failed_count,
+        }
+
+
+@app.post("/admin/reset-failed-ai-summaries")
+async def reset_failed_ai_summaries():
+    """
+    Reset failed AI summarizations to 'pending' so they can be re-processed.
+
+    This is useful after deploying fixes to the AI summarization code.
+    Returns count of reset attachments.
+    """
+    from app.database import SessionLocal
+    from app.models import OpportunityAttachment
+
+    with SessionLocal() as db:
+        # Count failed AI summaries
+        failed_count = db.query(OpportunityAttachment).filter(
+            OpportunityAttachment.ai_summary_status == "failed"
+        ).count()
+
+        # Reset them to pending
+        db.query(OpportunityAttachment).filter(
+            OpportunityAttachment.ai_summary_status == "failed"
+        ).update({
+            "ai_summary_status": "pending",
+            "ai_summary_error": None,
+            "ai_summarized_at": None,
+        })
+
+        db.commit()
+
+        return {
+            "status": "success",
+            "message": f"Reset {failed_count} failed AI summaries to pending",
+            "reset_count": failed_count,
+        }
+
+
 @app.post("/admin/migrate-opportunity-schema")
 async def migrate_opportunity_schema():
     """
