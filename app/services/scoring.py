@@ -4,13 +4,15 @@ Opportunity Scoring Service
 Calculates likelihood scores for federal contract opportunities
 to estimate probability of being under $100K.
 
+Also provides competition scoring to identify underserved opportunities.
+
 Score range: 0-100
-- Higher scores = more likely to be a smaller, accessible contract
-- Lower scores = likely large enterprise contracts
+- Likelihood Score: Higher = more likely to be a smaller, accessible contract
+- Competition Score: Lower = less competition, better chance of winning
 """
 
 import re
-from typing import Optional
+from typing import Optional, Dict, Any, List
 
 
 def calculate_likelihood_score(opportunity: dict) -> int:
@@ -264,3 +266,164 @@ def explain_score(opportunity: dict, score: int) -> list[str]:
         reasons.append("Standard scoring based on opportunity characteristics")
 
     return reasons
+
+
+def calculate_combined_score(opportunity: dict) -> Dict[str, Any]:
+    """
+    Calculate a combined opportunity score considering both
+    likelihood (contract size) and competition level.
+
+    Higher combined score = better opportunity (likely small + low competition)
+
+    Args:
+        opportunity: Raw opportunity data
+
+    Returns:
+        Dict with likelihood_score, competition_score, combined_score, and analysis
+    """
+    from app.services.competition import calculate_competition_score
+
+    # Get individual scores
+    likelihood = calculate_likelihood_score(opportunity)
+    competition_data = calculate_competition_score(opportunity)
+    competition = competition_data["score"]
+
+    # Combined score: high likelihood + low competition = high combined
+    # Formula: (likelihood * 0.5) + ((100 - competition) * 0.5)
+    # This gives equal weight to "likely small" and "low competition"
+    inverted_competition = 100 - competition  # Invert so lower competition = higher score
+    combined = int((likelihood * 0.5) + (inverted_competition * 0.5))
+
+    # Determine overall recommendation
+    if combined >= 75:
+        recommendation = "🎯 High Priority - Small contract with low competition"
+        priority = "high"
+    elif combined >= 60:
+        recommendation = "✅ Good Opportunity - Worth pursuing"
+        priority = "medium-high"
+    elif combined >= 45:
+        recommendation = "⚠️ Moderate - Evaluate carefully"
+        priority = "medium"
+    elif combined >= 30:
+        recommendation = "⚠️ Challenging - May be large or competitive"
+        priority = "low"
+    else:
+        recommendation = "🔴 Difficult - Large contract or high competition"
+        priority = "very-low"
+
+    return {
+        "likelihood_score": likelihood,
+        "likelihood_category": get_score_category(likelihood),
+        "competition_score": competition,
+        "competition_level": competition_data["level_label"],
+        "competition_factors": competition_data["factors"],
+        "competition_recommendations": competition_data["recommendations"],
+        "combined_score": combined,
+        "recommendation": recommendation,
+        "priority": priority,
+    }
+
+
+def get_early_stage_bonus(opportunity: dict) -> int:
+    """
+    Calculate bonus points for early-stage opportunities.
+
+    Sources Sought and RFI notices get bonuses because:
+    1. Less competition (fewer bidders aware)
+    2. Ability to shape requirements
+    3. More time to prepare
+
+    Args:
+        opportunity: Opportunity data
+
+    Returns:
+        Bonus points (0-20)
+    """
+    notice_type = (opportunity.get("notice_type") or opportunity.get("type") or "").lower()
+
+    if "sources sought" in notice_type:
+        return 20  # Best opportunity to influence requirements
+    elif "rfi" in notice_type or "request for information" in notice_type:
+        return 18
+    elif "special notice" in notice_type:
+        return 12
+    elif "presolicitation" in notice_type:
+        return 10
+    elif "combined synopsis" in notice_type:
+        return 5
+
+    return 0
+
+
+def is_underserved_opportunity(opportunity: dict) -> Dict[str, Any]:
+    """
+    Determine if an opportunity is in an underserved market.
+
+    Underserved = combination of:
+    - Low competition NAICS code
+    - Set-aside designation
+    - Early-stage notice
+    - Small dollar indicators
+
+    Args:
+        opportunity: Opportunity data
+
+    Returns:
+        Dict with is_underserved flag and reasons
+    """
+    reasons = []
+    score = 0
+
+    naics_code = (opportunity.get("naics_code") or opportunity.get("naicsCode") or "")[:6]
+    set_aside = opportunity.get("set_aside_type") or opportunity.get("typeOfSetAside") or ""
+    notice_type = opportunity.get("notice_type") or opportunity.get("type") or ""
+    title = (opportunity.get("title") or "").lower()
+    description = (opportunity.get("description") or "").lower()
+
+    # Low competition NAICS codes
+    LOW_COMP_NAICS = {
+        "541611", "519190", "611430", "541910", "541618",  # Adjacent markets
+        "531190", "424320", "621610", "333997", "334614",  # FY2024 low-competition
+    }
+    if naics_code in LOW_COMP_NAICS:
+        score += 25
+        reasons.append(f"NAICS {naics_code} has historically low competition")
+
+    # Set-aside designations
+    if "sole source" in set_aside.lower():
+        score += 30
+        reasons.append("Sole source designation limits competition")
+    elif any(x in set_aside.upper() for x in ["8(A)", "8A", "SDVOSB", "HUBZONE", "WOSB", "EDWOSB"]):
+        score += 20
+        reasons.append(f"Set-aside ({set_aside}) limits eligible bidders")
+    elif "small business" in set_aside.lower():
+        score += 10
+        reasons.append("Small business set-aside")
+
+    # Early-stage notices
+    if "sources sought" in notice_type.lower():
+        score += 25
+        reasons.append("Sources Sought - early stage, can shape requirements")
+    elif "presolicitation" in notice_type.lower():
+        score += 15
+        reasons.append("Presolicitation - limited awareness")
+
+    # Small dollar indicators
+    combined_text = f"{title} {description}"
+    if any(term in combined_text for term in ["simplified acquisition", "micropurchase", "under $100,000"]):
+        score += 15
+        reasons.append("Simplified acquisition threshold")
+
+    # Determine if underserved
+    is_underserved = score >= 40
+
+    return {
+        "is_underserved": is_underserved,
+        "underserved_score": score,
+        "reasons": reasons,
+        "recommendation": (
+            "🎯 Underserved opportunity - prioritize for bid/no-bid"
+            if is_underserved
+            else "Standard opportunity - evaluate based on fit"
+        ),
+    }

@@ -33,13 +33,20 @@ def sync_usaspending_job():
 
     USASPENDING_API_BASE = "https://api.usaspending.gov/api/v2"
 
-    # NAICS codes for IT/Data/Cloud services
+    # NAICS codes for IT/Data/Cloud services + adjacent underserved markets
     NAICS_CODES = [
+        # Primary (high volume)
         "541511",  # Custom Computer Programming Services
         "541512",  # Computer Systems Design Services
         "541519",  # Other Computer Related Services
         "518210",  # Data Processing/Hosting - AWS, ETL
         "541690",  # Scientific/Technical Consulting - Data science
+        # Adjacent markets (lower competition)
+        "541611",  # Administrative Management Consulting
+        "519190",  # All Other Information Services
+        "611430",  # Professional Development Training
+        "541910",  # Marketing Research & Public Opinion Polling
+        "541618",  # Other Management Consulting
     ]
 
     days_back = 30  # Sync last 30 days of awards
@@ -227,13 +234,21 @@ def sync_sam_gov_job(naics_index: int = None):
         logger.warning("SAM.gov API key not configured, skipping sync")
         return
 
-    # NAICS codes for IT/Data/Cloud services - we rotate through these
+    # NAICS codes for IT/Data/Cloud services + adjacent underserved markets
+    # We rotate through these throughout the day
     NAICS_CODES = [
+        # Primary (high volume)
         "541511",  # Custom Computer Programming Services
         "541512",  # Computer Systems Design Services
         "541519",  # Other Computer Related Services
         "518210",  # Data Processing/Hosting - AWS, ETL
         "541690",  # Scientific/Technical Consulting - Data science
+        # Adjacent markets (lower competition)
+        "541611",  # Administrative Management Consulting
+        "519190",  # All Other Information Services
+        "611430",  # Professional Development Training
+        "541910",  # Marketing Research & Public Opinion Polling
+        "541618",  # Other Management Consulting
     ]
 
     # Determine which NAICS to sync based on time or explicit index
@@ -663,14 +678,30 @@ def extract_pdf_text_job():
             }
 
             try:
-                # Add API key if SAM.gov URL
+                # Convert internal SAM.gov URLs to public API format
+                # Internal: https://sam.gov/api/prod/opps/v3/opportunities/{id}/resources/files/{resourceId}/download
+                # Public:   https://api.sam.gov/opportunities/v1/resources/files/{resourceId}/download
                 pdf_url = url
-                if "api.sam.gov" in pdf_url:
+
+                if "sam.gov/api/prod/opps" in pdf_url and "/resources/files/" in pdf_url:
+                    # Extract resourceId from internal URL
+                    import re
+                    match = re.search(r'/resources/files/([^/]+)/download', pdf_url)
+                    if match:
+                        resource_id = match.group(1)
+                        pdf_url = f"https://api.sam.gov/opportunities/v1/resources/files/{resource_id}/download"
+                        pdf_url = f"{pdf_url}?api_key={settings.sam_gov_api_key}"
+                        logger.debug(f"Converted internal URL to public API: {pdf_url[:80]}...")
+                elif "api.sam.gov" in pdf_url:
                     separator = "&" if "?" in pdf_url else "?"
                     pdf_url = f"{pdf_url}{separator}api_key={settings.sam_gov_api_key}"
 
-                # Download PDF with timeout
-                with httpx.Client(timeout=60.0) as client:
+                # Download PDF with timeout and proper headers
+                headers = {
+                    "Accept": "application/pdf,*/*",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                }
+                with httpx.Client(timeout=60.0, headers=headers) as client:
                     response = client.get(pdf_url, follow_redirects=True)
 
                     if response.status_code == 429:
@@ -733,9 +764,11 @@ def extract_pdf_text_job():
                     if result["status"] == "extracted":
                         att.text_content = result["text"]
                         att.extraction_status = "extracted"
+                        att.extraction_error = None  # Clear any previous error
                         extracted_count += 1
                     elif result["status"] == "skipped":
                         att.extraction_status = "skipped"
+                        att.extraction_error = None  # Clear any previous error
                         skipped_count += 1
                     else:
                         att.extraction_status = "failed"
@@ -1002,15 +1035,22 @@ def start_scheduler():
         name="Sync USAspending awards",
     )
 
-    # Sync SAM.gov 5 times daily, rotating through NAICS codes
-    # Spread across the day to stay within rate limits (~10 requests/day for non-federal keys)
-    # Each run syncs ONE NAICS code to minimize API calls
+    # Sync SAM.gov 10 times daily, covering all expanded NAICS codes
+    # Uses internal SAM.gov API which has no strict rate limits
+    # Each run syncs ONE NAICS code with full details and attachments
     sam_gov_schedule = [
-        (1, 0, 0),   # 1 AM UTC - NAICS 541511 (Custom Programming)
-        (5, 0, 1),   # 5 AM UTC - NAICS 541512 (Systems Design)
-        (9, 0, 2),   # 9 AM UTC - NAICS 541519 (Other Computer)
-        (13, 0, 3),  # 1 PM UTC - NAICS 518210 (Data Processing)
-        (17, 0, 4),  # 5 PM UTC - NAICS 541690 (Technical Consulting)
+        # Primary NAICS codes (high volume)
+        (0, 30, 0),   # 12:30 AM UTC - NAICS 541511 (Custom Programming)
+        (3, 0, 1),    # 3:00 AM UTC - NAICS 541512 (Systems Design)
+        (5, 30, 2),   # 5:30 AM UTC - NAICS 541519 (Other Computer)
+        (8, 0, 3),    # 8:00 AM UTC - NAICS 518210 (Data Processing)
+        (10, 30, 4),  # 10:30 AM UTC - NAICS 541690 (Technical Consulting)
+        # Adjacent/underserved NAICS codes (lower competition)
+        (13, 0, 5),   # 1:00 PM UTC - NAICS 541611 (Management Consulting)
+        (15, 30, 6),  # 3:30 PM UTC - NAICS 519190 (Other Information Services)
+        (18, 0, 7),   # 6:00 PM UTC - NAICS 611430 (Professional Training)
+        (20, 30, 8),  # 8:30 PM UTC - NAICS 541910 (Marketing Research)
+        (23, 0, 9),   # 11:00 PM UTC - NAICS 541618 (Other Mgmt Consulting)
     ]
 
     for hour, minute, naics_idx in sam_gov_schedule:
@@ -1021,6 +1061,43 @@ def start_scheduler():
             replace_existing=True,
             name=f"Sync SAM.gov opportunities (NAICS {naics_idx})",
             kwargs={"naics_index": naics_idx},
+        )
+
+    # Internal Scraper Sync - runs twice daily for ALL NAICS codes
+    # Uses internal SAM.gov API (no rate limits) for comprehensive data
+    # This supplements the public API sync with full details and attachments
+    scraper_naics_codes = [
+        "541511",  # Custom Programming
+        "541512",  # Systems Design
+        "541519",  # Other Computer
+        "518210",  # Data Processing
+        "541690",  # Technical Consulting
+        "541611",  # Management Consulting (underserved)
+        "519190",  # Other Information Services (underserved)
+        "611430",  # Professional Training (underserved)
+        "541910",  # Marketing Research (underserved)
+        "541618",  # Other Mgmt Consulting (underserved)
+    ]
+
+    # Schedule internal scraper at 2 AM and 2 PM UTC for each NAICS
+    for idx, naics in enumerate(scraper_naics_codes):
+        # Morning sync (2 AM + minutes offset to spread load)
+        scheduler.add_job(
+            scraper_sync_job,
+            CronTrigger(hour=2, minute=idx * 5),  # 2:00, 2:05, 2:10, etc.
+            id=f"scraper_sync_am_{naics}",
+            replace_existing=True,
+            name=f"Internal Scraper (AM) - NAICS {naics}",
+            kwargs={"naics_code": naics, "max_results": 500, "biddable_only": True},
+        )
+        # Afternoon sync (2 PM + minutes offset)
+        scheduler.add_job(
+            scraper_sync_job,
+            CronTrigger(hour=14, minute=idx * 5),  # 14:00, 14:05, 14:10, etc.
+            id=f"scraper_sync_pm_{naics}",
+            replace_existing=True,
+            name=f"Internal Scraper (PM) - NAICS {naics}",
+            kwargs={"naics_code": naics, "max_results": 500, "biddable_only": True},
         )
 
     # Backfill attachments at 7:30 AM UTC (after main sync, uses internal SAM.gov API)

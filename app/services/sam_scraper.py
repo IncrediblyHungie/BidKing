@@ -37,12 +37,30 @@ HEADERS = {
 }
 
 # NAICS codes for IT/Data/Cloud services
+# Primary codes (high volume, high competition)
 DEFAULT_NAICS_CODES = [
     "541511",  # Custom Computer Programming Services (PRIMARY)
     "541512",  # Computer Systems Design Services
     "541519",  # Other Computer Related Services
     "518210",  # Data Processing/Hosting - AWS, ETL
     "541690",  # Scientific/Technical Consulting
+]
+
+# Expanded NAICS codes for underserved/adjacent markets
+# These have lower competition but align with data/analytics/consulting skills
+EXPANDED_NAICS_CODES = [
+    # Primary (keep existing)
+    "541511",  # Custom Computer Programming Services
+    "541512",  # Computer Systems Design Services
+    "541519",  # Other Computer Related Services
+    "518210",  # Data Processing/Hosting - AWS, ETL
+    "541690",  # Scientific/Technical Consulting
+    # Adjacent markets (lower competition)
+    "541611",  # Administrative Management Consulting (data strategy, process improvement)
+    "519190",  # All Other Information Services (dashboards, reporting, data analysis)
+    "611430",  # Professional Development Training (BI tools, Python, data analysis training)
+    "541910",  # Marketing Research & Public Opinion Polling (data analysis, surveys)
+    "541618",  # Other Management Consulting (IT strategy, digital transformation)
 ]
 
 

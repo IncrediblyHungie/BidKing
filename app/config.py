@@ -208,12 +208,31 @@ SUBSCRIPTION_TIERS = {
 # =============================================================================
 
 RECOMMENDED_NAICS_CODES = [
+    # Primary IT/Data codes (high volume)
     ("541511", "Custom Computer Programming Services"),
     ("541512", "Computer Systems Design Services"),
     ("541519", "Other Computer Related Services"),
     ("518210", "Data Processing, Hosting, and Related Services"),
     ("541690", "Other Scientific and Technical Consulting Services"),
-    ("541712", "Research and Development in Physical, Engineering, and Life Sciences"),
-    ("541330", "Engineering Services"),
-    ("541990", "All Other Professional, Scientific, and Technical Services"),
+    # Adjacent markets (lower competition, underserved)
+    ("541611", "Administrative Management and General Management Consulting"),
+    ("519190", "All Other Information Services"),
+    ("611430", "Professional and Management Development Training"),
+    ("541910", "Marketing Research and Public Opinion Polling"),
+    ("541618", "Other Management Consulting Services"),
+]
+
+# Low competition NAICS codes (avg ~1.0 bids per solicitation in FY2024)
+# Source: Squared Compass analysis of FPDS data
+LOW_COMPETITION_NAICS = [
+    ("531190", "Lessors of Other Real Estate Property", 1.0),
+    ("424320", "Men's & Boys' Clothing Wholesalers", 1.0),
+    ("621610", "Home Health Care Services", 1.0),
+    ("333997", "Scale and Balance Manufacturing", 1.0),
+    ("334614", "Software & Pre-Recorded Media Manufacturing", 1.0),
+    ("453210", "Office Supplies & Stationery Stores", 1.01),
+    ("532283", "Home Health Equipment Rental", 1.05),
+    ("623110", "Nursing Care Facilities", 1.05),
+    ("624310", "Vocational Rehabilitation Services", 1.06),
+    ("621991", "Blood and Organ Banks", 1.07),
 ]

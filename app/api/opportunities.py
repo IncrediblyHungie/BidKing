@@ -41,6 +41,14 @@ async def list_opportunities(
     states: Optional[List[str]] = Query(None),
     agencies: Optional[List[str]] = Query(None),
     set_aside_types: Optional[List[str]] = Query(None),
+    notice_types: Optional[List[str]] = Query(
+        None,
+        description="Filter by notice type (e.g., 'Sources Sought', 'Presolicitation', 'Solicitation')"
+    ),
+    early_stage_only: bool = Query(
+        False,
+        description="Only show early-stage opportunities (Sources Sought, RFI, Presolicitation)"
+    ),
     min_score: int = Query(0, ge=0, le=100),
     max_score: int = Query(100, ge=0, le=100),
     # AI Estimated Value filter
@@ -118,6 +126,23 @@ async def list_opportunities(
     # Set-aside filter
     if set_aside_types:
         base_query = base_query.filter(Opportunity.set_aside_type.in_(set_aside_types))
+
+    # Notice type filter
+    if notice_types:
+        notice_conditions = [
+            Opportunity.notice_type.ilike(f"%{nt}%")
+            for nt in notice_types
+        ]
+        base_query = base_query.filter(or_(*notice_conditions))
+
+    # Early stage filter (Sources Sought, RFI, Presolicitation)
+    if early_stage_only:
+        early_stage_types = ["Sources Sought", "Presolicitation", "Special Notice"]
+        early_conditions = [
+            Opportunity.notice_type.ilike(f"%{et}%")
+            for et in early_stage_types
+        ]
+        base_query = base_query.filter(or_(*early_conditions))
 
     # Score filter
     base_query = base_query.filter(
@@ -665,6 +690,87 @@ async def get_opportunity_analysis(
         "likelihood_score": opportunity.likelihood_score,
         "score_category": category,
         "score_reasons": reasons,
+    }
+
+
+@router.get("/{opportunity_id}/competition")
+async def get_competition_analysis(
+    opportunity_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """
+    Get competition analysis for an opportunity.
+
+    Returns competition score (0-100, lower = less competition) based on:
+    - Set-aside type (sole source, small business, etc.)
+    - Notice type (Sources Sought = early stage, less competition)
+    - NAICS code historical competition patterns
+    - Contract characteristics
+
+    Public endpoint - no auth required.
+    """
+    from app.services.competition import calculate_competition_score, get_historical_competition
+    from app.services.scoring import calculate_combined_score, is_underserved_opportunity
+
+    opportunity = db.query(Opportunity).filter(
+        Opportunity.id == opportunity_id
+    ).first()
+
+    if not opportunity:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Opportunity not found",
+        )
+
+    # Build opportunity data dict for scoring
+    opp_data = {
+        "notice_id": opportunity.notice_id,
+        "title": opportunity.title,
+        "description": opportunity.description,
+        "naics_code": opportunity.naics_code,
+        "set_aside_type": opportunity.set_aside_type,
+        "notice_type": opportunity.notice_type,
+        "agency_name": opportunity.agency_name,
+    }
+
+    # Get competition analysis
+    competition = calculate_competition_score(opp_data, db)
+
+    # Get combined score (likelihood + competition)
+    combined = calculate_combined_score(opp_data)
+
+    # Check if underserved
+    underserved = is_underserved_opportunity(opp_data)
+
+    # Get historical market data for this NAICS/agency
+    historical = None
+    if opportunity.naics_code:
+        historical = get_historical_competition(
+            db,
+            naics_code=opportunity.naics_code,
+            agency_name=opportunity.agency_name,
+            lookback_days=365,
+        )
+
+    return {
+        "opportunity_id": str(opportunity.id),
+        "title": opportunity.title,
+        "competition": {
+            "score": competition["score"],
+            "level": competition["level"],
+            "level_label": competition["level_label"],
+            "factors": competition["factors"],
+            "recommendations": competition["recommendations"],
+        },
+        "combined_analysis": {
+            "likelihood_score": combined["likelihood_score"],
+            "competition_score": combined["competition_score"],
+            "combined_score": combined["combined_score"],
+            "priority": combined["priority"],
+            "recommendation": combined["recommendation"],
+        },
+        "underserved": underserved,
+        "historical_data": historical,
     }
 
 
