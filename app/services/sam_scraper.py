@@ -491,7 +491,14 @@ def sync_opportunities_with_full_details(
                     # Filter for biddable opportunities only
                     if biddable_only:
                         is_biddable_type = notice_type in BIDDABLE_TYPES
-                        has_future_deadline = response_deadline and response_deadline > datetime.utcnow()
+
+                        # Compare deadlines in a timezone-safe way
+                        # Strip timezone from deadline for comparison with naive utcnow()
+                        if response_deadline:
+                            deadline_naive = response_deadline.replace(tzinfo=None) if hasattr(response_deadline, 'tzinfo') and response_deadline.tzinfo else response_deadline
+                            has_future_deadline = deadline_naive > datetime.utcnow()
+                        else:
+                            has_future_deadline = False
 
                         if not is_biddable_type or not has_future_deadline:
                             stats["skipped_not_biddable"] += 1
