@@ -584,8 +584,11 @@ def sync_opportunities_with_full_details(
 
                 except Exception as e:
                     notice_id_for_log = opp.get("notice_id", "UNKNOWN")
-                    logger.warning(f"Error processing opportunity {notice_id_for_log}: {type(e).__name__}: {e}")
+                    error_msg = f"{type(e).__name__}: {e}"
+                    logger.warning(f"Error processing opportunity {notice_id_for_log}: {error_msg}")
                     stats["errors"] += 1
+                    if "last_error" not in stats:
+                        stats["last_error"] = error_msg
                     continue
 
             db.commit()
