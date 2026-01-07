@@ -96,3 +96,9 @@ frontend/.vite/
 frontend-temp-tailadmin/
 frontend-temp-landing/
 frontend-tailadmin/
+
+# Scraper specific
+scraper/pdfs/
+scraper/webshare_datacenter_proxies.txt
+scraper/*.db
+scraper/logs/

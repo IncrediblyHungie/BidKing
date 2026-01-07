@@ -1,0 +1,19 @@
+# SAM.gov Mass Scraper Dependencies
+
+# HTTP client with proxy support
+httpx[http2]>=0.25.0
+
+# Async support
+asyncio-throttle>=1.0.2
+
+# Progress bars
+tqdm>=4.66.0
+
+# Data export
+pandas>=2.0.0
+
+# PDF text extraction (optional, for attachment processing)
+pypdf>=3.0.0
+
+# CLI enhancements
+rich>=13.0.0
