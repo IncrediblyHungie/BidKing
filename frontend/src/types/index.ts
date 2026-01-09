@@ -382,3 +382,80 @@ export interface MarketOverview {
   low_score_opportunities: number;
   generated_at: string;
 }
+
+// Saved Search types
+export interface SavedSearchFilters {
+  search_query: string | null;
+  naics_codes: string[];
+  agencies: string[];
+  states: string[];
+  set_aside_types: string[];
+  notice_types: string[];
+  min_value: number | null;
+  max_value: number | null;
+  has_ai_analysis: string;
+  has_value_estimate: string;
+  early_stage_only: boolean;
+  sort_by: string;
+  sort_order: string;
+}
+
+export interface SavedSearch {
+  id: string;
+  user_id: string;
+  name: string;
+  is_default: boolean;
+  search_query: string | null;
+  naics_codes: string[] | null;
+  agencies: string[] | null;
+  states: string[] | null;
+  set_aside_types: string[] | null;
+  notice_types: string[] | null;
+  min_value: number | null;
+  max_value: number | null;
+  has_ai_analysis: string;
+  has_value_estimate: string;
+  early_stage_only: boolean;
+  sort_by: string;
+  sort_order: string;
+  use_count: number;
+  last_used_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SavedSearchCreate {
+  name: string;
+  is_default?: boolean;
+  search_query?: string;
+  naics_codes?: string[];
+  agencies?: string[];
+  states?: string[];
+  set_aside_types?: string[];
+  notice_types?: string[];
+  min_value?: number;
+  max_value?: number;
+  has_ai_analysis?: string;
+  has_value_estimate?: string;
+  early_stage_only?: boolean;
+  sort_by?: string;
+  sort_order?: string;
+}
+
+export interface SavedSearchUpdate {
+  name?: string;
+  is_default?: boolean;
+  search_query?: string;
+  naics_codes?: string[];
+  agencies?: string[];
+  states?: string[];
+  set_aside_types?: string[];
+  notice_types?: string[];
+  min_value?: number;
+  max_value?: number;
+  has_ai_analysis?: string;
+  has_value_estimate?: string;
+  early_stage_only?: boolean;
+  sort_by?: string;
+  sort_order?: string;
+}

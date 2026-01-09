@@ -41,7 +41,9 @@ async def lifespan(app: FastAPI):
         PastPerformance, CapabilityStatement, OpportunityMetadata,
         OpportunityScore, OpportunityDecision,
         # Proposal Templates
-        ProposalTemplate, GeneratedSection
+        ProposalTemplate, GeneratedSection,
+        # Saved Searches
+        SavedSearch
     )
     print("Creating database tables...")
     Base.metadata.create_all(bind=engine)

@@ -44,6 +44,11 @@ from app.schemas.company import (
     OnboardingStatusResponse,
     OpportunityScoreResponse,
 )
+from app.schemas.saved_search import (
+    SavedSearchCreate,
+    SavedSearchUpdate,
+    SavedSearchResponse,
+)
 
 __all__ = [
     # User
@@ -84,4 +89,8 @@ __all__ = [
     "PastPerformanceResponse",
     "OnboardingStatusResponse",
     "OpportunityScoreResponse",
+    # Saved Search
+    "SavedSearchCreate",
+    "SavedSearchUpdate",
+    "SavedSearchResponse",
 ]

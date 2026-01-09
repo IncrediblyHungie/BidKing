@@ -6,8 +6,9 @@ import Input from "../../components/form/input/InputField";
 import Label from "../../components/form/Label";
 import Button from "../../components/ui/button/Button";
 import SearchableSelect from "../../components/form/SearchableSelect";
-import { Opportunity } from "../../types";
+import { Opportunity, SavedSearch, SavedSearchCreate } from "../../types";
 import { useAuthStore } from "../../stores/authStore";
+import { useSavedSearchesStore } from "../../stores/savedSearchesStore";
 import { opportunitiesApi, OpportunityScore } from "../../api/opportunities";
 import { getScoresUpdatedTimestamp, clearScoresUpdatedFlag } from "../../stores/companyStore";
 
@@ -157,6 +158,14 @@ export default function OpportunitiesList() {
   // Auth state for personalized scoring
   const { isAuthenticated } = useAuthStore();
 
+  // Saved searches state
+  const { savedSearches, fetchSavedSearches, createSavedSearch, useSavedSearch, deleteSavedSearch } = useSavedSearchesStore();
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveSearchName, setSaveSearchName] = useState("");
+  const [saveAsDefault, setSaveAsDefault] = useState(false);
+  const [showSavedSearchesDropdown, setShowSavedSearchesDropdown] = useState(false);
+  const savedSearchesDropdownRef = useRef<HTMLDivElement>(null);
+
   // Use direct fetch instead of Zustand store (same pattern as Recompetes)
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -270,6 +279,91 @@ export default function OpportunitiesList() {
     fetchOpportunities();
     fetchFilterStats();
   }, [fetchOpportunities]);
+
+  // Fetch saved searches when authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchSavedSearches();
+    }
+  }, [isAuthenticated, fetchSavedSearches]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (savedSearchesDropdownRef.current && !savedSearchesDropdownRef.current.contains(event.target as Node)) {
+        setShowSavedSearchesDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Apply saved search filters
+  const applySavedSearch = async (search: SavedSearch) => {
+    try {
+      await useSavedSearch(search.id);
+      // Apply filters from saved search
+      setSearchInput(search.search_query || "");
+      setNaicsFilter(search.naics_codes?.[0] || "");
+      setAgencyFilter(search.agencies?.[0] || "");
+      setSetAsideFilter(search.set_aside_types?.[0] || "");
+      setStateFilter(search.states?.[0] || "");
+      setNoticeTypeFilter(search.notice_types?.[0] || "");
+      setMinValue(search.min_value?.toString() || "");
+      setMaxValue(search.max_value?.toString() || "");
+      setHasAiAnalysis(search.has_ai_analysis as "all" | "yes" | "no");
+      setHasValueEstimate(search.has_value_estimate as "all" | "yes" | "no");
+      setEarlyStageOnly(search.early_stage_only);
+      setCurrentSort(search.sort_by);
+      setCurrentOrder(search.sort_order);
+      setPage(1);
+      setShowSavedSearchesDropdown(false);
+    } catch (err) {
+      console.error("Failed to apply saved search:", err);
+    }
+  };
+
+  // Save current search filters
+  const handleSaveSearch = async () => {
+    if (!saveSearchName.trim()) return;
+    try {
+      const searchData: SavedSearchCreate = {
+        name: saveSearchName.trim(),
+        is_default: saveAsDefault,
+        search_query: searchInput || undefined,
+        naics_codes: naicsFilter ? [naicsFilter] : undefined,
+        agencies: agencyFilter ? [agencyFilter] : undefined,
+        states: stateFilter ? [stateFilter] : undefined,
+        set_aside_types: setAsideFilter ? [setAsideFilter] : undefined,
+        notice_types: noticeTypeFilter ? [noticeTypeFilter] : undefined,
+        min_value: minValue ? parseFloat(minValue) : undefined,
+        max_value: maxValue ? parseFloat(maxValue) : undefined,
+        has_ai_analysis: hasAiAnalysis,
+        has_value_estimate: hasValueEstimate,
+        early_stage_only: earlyStageOnly,
+        sort_by: currentSort,
+        sort_order: currentOrder,
+      };
+      await createSavedSearch(searchData);
+      setShowSaveModal(false);
+      setSaveSearchName("");
+      setSaveAsDefault(false);
+    } catch (err) {
+      console.error("Failed to save search:", err);
+    }
+  };
+
+  // Handle delete saved search
+  const handleDeleteSavedSearch = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirm("Delete this saved search?")) {
+      try {
+        await deleteSavedSearch(id);
+      } catch (err) {
+        console.error("Failed to delete saved search:", err);
+      }
+    }
+  };
 
   // Track when scores were last fetched and for which opportunity IDs
   const lastScoreFetchRef = useRef<number>(0);
@@ -524,6 +618,84 @@ export default function OpportunitiesList() {
                   </svg>
                   Export CSV
                 </Button>
+                {/* Saved Searches - only for authenticated users */}
+                {isAuthenticated && (
+                  <>
+                    {/* Load Search Dropdown */}
+                    <div className="relative" ref={savedSearchesDropdownRef}>
+                      <button
+                        type="button"
+                        onClick={() => setShowSavedSearchesDropdown(!showSavedSearchesDropdown)}
+                        className="px-4 py-2.5 text-sm border rounded-lg hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-700 flex items-center gap-2"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                        </svg>
+                        Load Search
+                        {savedSearches.length > 0 && (
+                          <span className="px-1.5 py-0.5 text-xs bg-blue-100 text-blue-800 rounded dark:bg-blue-900 dark:text-blue-200">
+                            {savedSearches.length}
+                          </span>
+                        )}
+                      </button>
+                      {showSavedSearchesDropdown && (
+                        <div className="absolute right-0 z-50 mt-2 w-72 bg-white border rounded-lg shadow-lg dark:bg-gray-800 dark:border-gray-700">
+                          <div className="p-2">
+                            {savedSearches.length === 0 ? (
+                              <p className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
+                                No saved searches yet
+                              </p>
+                            ) : (
+                              <div className="max-h-64 overflow-y-auto">
+                                {savedSearches.map((search) => (
+                                  <div
+                                    key={search.id}
+                                    onClick={() => applySavedSearch(search)}
+                                    className="flex items-center justify-between px-3 py-2 text-sm rounded cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700"
+                                  >
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-medium truncate">{search.name}</span>
+                                        {search.is_default && (
+                                          <span className="px-1.5 py-0.5 text-xs bg-green-100 text-green-800 rounded dark:bg-green-900/30 dark:text-green-400">
+                                            Default
+                                          </span>
+                                        )}
+                                      </div>
+                                      <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                        Used {search.use_count} times
+                                      </p>
+                                    </div>
+                                    <button
+                                      onClick={(e) => handleDeleteSavedSearch(search.id, e)}
+                                      className="p-1 text-gray-400 hover:text-red-500"
+                                      title="Delete"
+                                    >
+                                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                      </svg>
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    {/* Save Search Button */}
+                    <button
+                      type="button"
+                      onClick={() => setShowSaveModal(true)}
+                      className="px-4 py-2.5 text-sm border border-blue-500 text-blue-600 rounded-lg hover:bg-blue-50 dark:border-blue-400 dark:text-blue-400 dark:hover:bg-blue-900/20 flex items-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                      </svg>
+                      Save Search
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
@@ -930,6 +1102,84 @@ export default function OpportunitiesList() {
           </div>
         )}
       </div>
+
+      {/* Save Search Modal */}
+      {showSaveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="w-full max-w-md p-6 bg-white rounded-lg shadow-xl dark:bg-gray-800">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white">
+                Save Current Search
+              </h3>
+              <button
+                onClick={() => setShowSaveModal(false)}
+                className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <Label>Search Name</Label>
+                <Input
+                  type="text"
+                  value={saveSearchName}
+                  onChange={(e) => setSaveSearchName(e.target.value)}
+                  placeholder="e.g., My IT Contracts Filter"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="saveAsDefault"
+                  checked={saveAsDefault}
+                  onChange={(e) => setSaveAsDefault(e.target.checked)}
+                  className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                />
+                <label htmlFor="saveAsDefault" className="text-sm text-gray-700 dark:text-gray-300">
+                  Set as default search
+                </label>
+              </div>
+              {/* Show current filters summary */}
+              <div className="p-3 text-sm bg-gray-50 rounded dark:bg-gray-700/50">
+                <p className="font-medium text-gray-700 dark:text-gray-300 mb-2">Current Filters:</p>
+                <div className="flex flex-wrap gap-1">
+                  {searchInput && <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs dark:bg-blue-900/30 dark:text-blue-400">Query: "{searchInput}"</span>}
+                  {naicsFilter && <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs dark:bg-green-900/30 dark:text-green-400">NAICS: {naicsFilter}</span>}
+                  {agencyFilter && <span className="px-2 py-0.5 bg-purple-100 text-purple-800 rounded text-xs dark:bg-purple-900/30 dark:text-purple-400">Agency: {agencyFilter.substring(0, 20)}...</span>}
+                  {setAsideFilter && <span className="px-2 py-0.5 bg-orange-100 text-orange-800 rounded text-xs dark:bg-orange-900/30 dark:text-orange-400">Set-Aside: {setAsideFilter}</span>}
+                  {stateFilter && <span className="px-2 py-0.5 bg-cyan-100 text-cyan-800 rounded text-xs dark:bg-cyan-900/30 dark:text-cyan-400">State: {stateFilter}</span>}
+                  {noticeTypeFilter && <span className="px-2 py-0.5 bg-yellow-100 text-yellow-800 rounded text-xs dark:bg-yellow-900/30 dark:text-yellow-400">Type: {noticeTypeFilter}</span>}
+                  {minValue && <span className="px-2 py-0.5 bg-gray-200 text-gray-800 rounded text-xs dark:bg-gray-600 dark:text-gray-300">Min: ${minValue}</span>}
+                  {maxValue && <span className="px-2 py-0.5 bg-gray-200 text-gray-800 rounded text-xs dark:bg-gray-600 dark:text-gray-300">Max: ${maxValue}</span>}
+                  {earlyStageOnly && <span className="px-2 py-0.5 bg-purple-100 text-purple-800 rounded text-xs dark:bg-purple-900/30 dark:text-purple-400">Early Stage</span>}
+                  {!searchInput && !naicsFilter && !agencyFilter && !setAsideFilter && !stateFilter && !noticeTypeFilter && !minValue && !maxValue && !earlyStageOnly && (
+                    <span className="text-gray-500 dark:text-gray-400">No filters applied</span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => { setShowSaveModal(false); setSaveSearchName(""); setSaveAsDefault(false); }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={handleSaveSearch}
+                disabled={!saveSearchName.trim()}
+              >
+                Save Search
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

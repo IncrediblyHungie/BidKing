@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.api import auth, users, alerts, opportunities, subscriptions, market, webhooks, profile, analytics, celery_tasks, templates, competitors
+from app.api import auth, users, alerts, opportunities, subscriptions, market, webhooks, profile, analytics, celery_tasks, templates, competitors, saved_searches
 
 api_router = APIRouter()
 
@@ -18,3 +18,4 @@ api_router.include_router(analytics.router, prefix="/analytics", tags=["analytic
 api_router.include_router(celery_tasks.router, prefix="/celery", tags=["celery"])
 api_router.include_router(templates.router, prefix="/proposals", tags=["proposals"])
 api_router.include_router(competitors.router, tags=["competitor-analytics"])
+api_router.include_router(saved_searches.router, prefix="/saved-searches", tags=["saved-searches"])

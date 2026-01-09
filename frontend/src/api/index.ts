@@ -8,3 +8,4 @@ export { alertsApi } from './alerts';
 export { opportunitiesApi } from './opportunities';
 export { marketApi } from './market';
 export { subscriptionsApi } from './subscriptions';
+export * as savedSearchesApi from './savedSearches';

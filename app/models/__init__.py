@@ -31,6 +31,7 @@ from app.models.proposal_template import (
     ProposalTemplate,
     GeneratedSection,
 )
+from app.models.saved_search import SavedSearch
 
 __all__ = [
     "User",
@@ -61,4 +62,6 @@ __all__ = [
     # Proposal Templates
     "ProposalTemplate",
     "GeneratedSection",
+    # Saved Searches
+    "SavedSearch",
 ]

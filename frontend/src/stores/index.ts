@@ -5,3 +5,4 @@
 export { useAuthStore } from './authStore';
 export { useOpportunitiesStore } from './opportunitiesStore';
 export { useAlertsStore } from './alertsStore';
+export { useSavedSearchesStore } from './savedSearchesStore';
