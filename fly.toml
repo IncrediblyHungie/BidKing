@@ -9,13 +9,26 @@ primary_region = "sjc"  # San Jose (closest to California)
 [env]
   PORT = "8000"
   ENVIRONMENT = "production"
+  REDIS_URL = "redis://default:AWSSAAIncDJhMjg5OTRlOGFlMjY0NmM0YmFlYjlkMjVkMjhlYmE5NHAyMjU3NDY@able-penguin-25746.upstash.io:6379"
 
+# =============================================================================
+# Process Groups: API server + Celery worker (on same machine for SQLite access)
+# =============================================================================
+# NOTE: Worker runs on same machine as app to share the SQLite database volume.
+# A start script runs both uvicorn and celery worker in the same container.
+[processes]
+  app = "/bin/sh -c 'celery -A worker.celery_app worker --loglevel=info --concurrency=2 -Q celery,default,sync,alerts,emails,maintenance & uvicorn app.main:app --host 0.0.0.0 --port 8000'"
+
+# =============================================================================
+# HTTP Service (for 'app' process only)
+# =============================================================================
 [http_service]
   internal_port = 8000
   force_https = true
-  auto_stop_machines = true
+  auto_stop_machines = false
   auto_start_machines = true
   min_machines_running = 1
+  processes = ["app"]  # Only route HTTP to app process
 
   [http_service.concurrency]
     type = "connections"
@@ -33,9 +46,11 @@ primary_region = "sjc"  # San Jose (closest to California)
   source = "bidking_data"
   destination = "/app/data"
 
+# =============================================================================
 # Resource allocation
-# Increased memory for AI summarization (processing large PDF/DOCX documents)
+# Increased for Celery worker + AI summarization
+# =============================================================================
 [[vm]]
   cpu_kind = "shared"
-  cpus = 1
-  memory_mb = 1024
+  cpus = 2
+  memory_mb = 2048

@@ -9,6 +9,7 @@ import { persist } from 'zustand/middleware';
 import { User as SupabaseUser, Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { getOnboardingStatus } from '../api/company';
+import apiClient from '../api/client';
 
 interface User {
   id: string;
@@ -17,6 +18,16 @@ interface User {
   subscription_tier: string;
   is_verified: boolean;
   created_at: string;
+}
+
+// Helper to fetch actual subscription tier from backend
+async function fetchSubscriptionTier(): Promise<string> {
+  try {
+    const response = await apiClient.get('/users/me');
+    return response.data?.subscription_tier || 'free';
+  } catch {
+    return 'free';
+  }
 }
 
 interface UserLogin {
@@ -47,7 +58,7 @@ interface AuthState {
   logout: () => Promise<void>;
   fetchUser: () => Promise<void>;
   clearError: () => void;
-  setSession: (session: Session | null) => void;
+  setSession: (session: Session | null) => Promise<void>;
   initialize: () => Promise<void>;
 }
 
@@ -77,6 +88,9 @@ export const useAuthStore = create<AuthState>()(
           }
 
           if (session) {
+            // Fetch actual subscription tier from backend
+            const tier = await fetchSubscriptionTier();
+
             set({
               session,
               supabaseUser: session.user,
@@ -85,7 +99,7 @@ export const useAuthStore = create<AuthState>()(
                 id: session.user.id,
                 email: session.user.email || '',
                 company_name: session.user.user_metadata?.company_name || session.user.user_metadata?.full_name,
-                subscription_tier: 'free',
+                subscription_tier: tier,
                 is_verified: session.user.email_confirmed_at != null,
                 created_at: session.user.created_at,
               },
@@ -114,10 +128,13 @@ export const useAuthStore = create<AuthState>()(
           }
 
           // Listen for auth state changes (for non-callback scenarios)
-          supabase.auth.onAuthStateChange((event, session) => {
+          supabase.auth.onAuthStateChange(async (event, session) => {
             console.log('Auth state change:', event, session?.user?.email);
 
             if (session) {
+              // Fetch actual subscription tier from backend
+              const tier = await fetchSubscriptionTier();
+
               set({
                 session,
                 supabaseUser: session.user,
@@ -126,7 +143,7 @@ export const useAuthStore = create<AuthState>()(
                   id: session.user.id,
                   email: session.user.email || '',
                   company_name: session.user.user_metadata?.company_name || session.user.user_metadata?.full_name,
-                  subscription_tier: 'free',
+                  subscription_tier: tier,
                   is_verified: session.user.email_confirmed_at != null,
                   created_at: session.user.created_at,
                 },
@@ -174,6 +191,9 @@ export const useAuthStore = create<AuthState>()(
           }
 
           if (data.session) {
+            // Fetch actual subscription tier from backend
+            const tier = await fetchSubscriptionTier();
+
             set({
               session: data.session,
               supabaseUser: data.user,
@@ -183,7 +203,7 @@ export const useAuthStore = create<AuthState>()(
                 id: data.user.id,
                 email: data.user.email || '',
                 company_name: data.user.user_metadata?.company_name,
-                subscription_tier: 'free',
+                subscription_tier: tier,
                 is_verified: data.user.email_confirmed_at != null,
                 created_at: data.user.created_at,
               },
@@ -241,6 +261,7 @@ export const useAuthStore = create<AuthState>()(
 
           // If email confirmation is disabled, user is immediately logged in
           if (authData.session) {
+            // New users start with free tier
             set({
               session: authData.session,
               supabaseUser: authData.user,
@@ -250,7 +271,7 @@ export const useAuthStore = create<AuthState>()(
                 id: authData.user!.id,
                 email: authData.user!.email || '',
                 company_name: data.company_name,
-                subscription_tier: 'free',
+                subscription_tier: 'free',  // New users always start free
                 is_verified: authData.user!.email_confirmed_at != null,
                 created_at: authData.user!.created_at,
               },
@@ -294,6 +315,9 @@ export const useAuthStore = create<AuthState>()(
           }
 
           if (user) {
+            // Fetch actual subscription tier from backend
+            const tier = await fetchSubscriptionTier();
+
             set({
               supabaseUser: user,
               isAuthenticated: true,
@@ -301,7 +325,7 @@ export const useAuthStore = create<AuthState>()(
                 id: user.id,
                 email: user.email || '',
                 company_name: user.user_metadata?.company_name,
-                subscription_tier: 'free',
+                subscription_tier: tier,
                 is_verified: user.email_confirmed_at != null,
                 created_at: user.created_at,
               },
@@ -316,8 +340,11 @@ export const useAuthStore = create<AuthState>()(
 
       clearError: () => set({ error: null }),
 
-      setSession: (session: Session | null) => {
+      setSession: async (session: Session | null) => {
         if (session) {
+          // Fetch actual subscription tier from backend
+          const tier = await fetchSubscriptionTier();
+
           set({
             session,
             supabaseUser: session.user,
@@ -326,7 +353,7 @@ export const useAuthStore = create<AuthState>()(
               id: session.user.id,
               email: session.user.email || '',
               company_name: session.user.user_metadata?.company_name,
-              subscription_tier: 'free',
+              subscription_tier: tier,
               is_verified: session.user.email_confirmed_at != null,
               created_at: session.user.created_at,
             },

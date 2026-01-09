@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
+import { getIncumbentVulnerability, IncumbentVulnerability } from "../../api/opportunities";
 
 interface ContractDetails {
   award_type: string | null;
@@ -216,6 +217,139 @@ function SmallDaysBadge({ days }: { days: number | null }) {
     <span className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded ${getColor()}`}>
       {label}
     </span>
+  );
+}
+
+// Vulnerability Badge component - shows how beatable the incumbent is
+function VulnerabilityBadge({ vulnerability }: { vulnerability: IncumbentVulnerability }) {
+  const getColor = () => {
+    if (vulnerability.level === "High") return "bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800";
+    if (vulnerability.level === "Medium") return "bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-800";
+    return "bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800";
+  };
+
+  const getLabel = () => {
+    if (vulnerability.level === "High") return "Beatable";
+    if (vulnerability.level === "Medium") return "Moderate";
+    return "Strong Incumbent";
+  };
+
+  return (
+    <div className={`inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-lg border ${getColor()}`}>
+      <span className="text-lg">{vulnerability.level === "High" ? "🎯" : vulnerability.level === "Medium" ? "⚡" : "🛡️"}</span>
+      <div>
+        <div className="font-semibold">{getLabel()}</div>
+        <div className="text-xs opacity-75">Vulnerability: {vulnerability.vulnerability_score}%</div>
+      </div>
+    </div>
+  );
+}
+
+// Detailed Vulnerability Card for expanded view
+function VulnerabilityCard({ vulnerability }: { vulnerability: IncumbentVulnerability }) {
+  const getFactorColor = (score: number) => {
+    if (score >= 70) return "text-green-600 dark:text-green-400";
+    if (score >= 40) return "text-yellow-600 dark:text-yellow-400";
+    return "text-red-600 dark:text-red-400";
+  };
+
+  const getBarColor = (score: number) => {
+    if (score >= 70) return "bg-green-500";
+    if (score >= 40) return "bg-yellow-500";
+    return "bg-red-500";
+  };
+
+  return (
+    <div className="p-4 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg">
+      <div className="flex items-center gap-3 mb-4">
+        <div className="flex items-center justify-center w-12 h-12 bg-emerald-100 dark:bg-emerald-900/40 rounded-full">
+          <span className={`text-xl font-bold ${getFactorColor(vulnerability.vulnerability_score)}`}>
+            {vulnerability.vulnerability_score}%
+          </span>
+        </div>
+        <div>
+          <div className="font-semibold text-emerald-900 dark:text-emerald-100">
+            Incumbent Vulnerability Analysis
+          </div>
+          <div className="text-sm text-emerald-700 dark:text-emerald-300">
+            {vulnerability.recommendation}
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {/* Concentration Risk */}
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-gray-700 dark:text-gray-300">Concentration Risk</span>
+          <div className="flex items-center gap-2">
+            <div className="w-24 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+              <div className={`h-full ${getBarColor(vulnerability.factors.concentration.score)}`} style={{ width: `${vulnerability.factors.concentration.score}%` }}></div>
+            </div>
+            <span className={`text-sm font-medium w-8 text-right ${getFactorColor(vulnerability.factors.concentration.score)}`}>
+              {vulnerability.factors.concentration.score}
+            </span>
+          </div>
+        </div>
+
+        {/* Expertise */}
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-gray-700 dark:text-gray-300">NAICS Expertise</span>
+          <div className="flex items-center gap-2">
+            <div className="w-24 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+              <div className={`h-full ${getBarColor(vulnerability.factors.expertise.score)}`} style={{ width: `${vulnerability.factors.expertise.score}%` }}></div>
+            </div>
+            <span className={`text-sm font-medium w-8 text-right ${getFactorColor(vulnerability.factors.expertise.score)}`}>
+              {vulnerability.factors.expertise.score}
+            </span>
+          </div>
+        </div>
+
+        {/* Trajectory */}
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-gray-700 dark:text-gray-300">Contract Trajectory</span>
+          <div className="flex items-center gap-2">
+            <div className="w-24 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+              <div className={`h-full ${getBarColor(vulnerability.factors.trajectory.score)}`} style={{ width: `${vulnerability.factors.trajectory.score}%` }}></div>
+            </div>
+            <span className={`text-sm font-medium w-8 text-right ${getFactorColor(vulnerability.factors.trajectory.score)}`}>
+              {vulnerability.factors.trajectory.score}
+            </span>
+          </div>
+        </div>
+
+        {/* Market Share */}
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-gray-700 dark:text-gray-300">Market Share</span>
+          <div className="flex items-center gap-2">
+            <div className="w-24 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+              <div className={`h-full ${getBarColor(vulnerability.factors.market_share.score)}`} style={{ width: `${vulnerability.factors.market_share.score}%` }}></div>
+            </div>
+            <span className={`text-sm font-medium w-8 text-right ${getFactorColor(vulnerability.factors.market_share.score)}`}>
+              {vulnerability.factors.market_share.score}
+            </span>
+          </div>
+        </div>
+
+        {/* Recompete History */}
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-gray-700 dark:text-gray-300">Recompete History</span>
+          <div className="flex items-center gap-2">
+            <div className="w-24 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+              <div className={`h-full ${getBarColor(vulnerability.factors.recompete_history.score)}`} style={{ width: `${vulnerability.factors.recompete_history.score}%` }}></div>
+            </div>
+            <span className={`text-sm font-medium w-8 text-right ${getFactorColor(vulnerability.factors.recompete_history.score)}`}>
+              {vulnerability.factors.recompete_history.score}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {vulnerability.summary && (
+        <div className="mt-4 pt-3 border-t border-emerald-200 dark:border-emerald-700 text-xs text-gray-500">
+          {vulnerability.incumbent_name}: {vulnerability.summary.total_contracts} contracts worth ${(vulnerability.summary.total_value / 1000000).toFixed(1)}M
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -729,6 +863,7 @@ export default function RecompeteDetail() {
   const [recompete, setRecompete] = useState<RecompeteData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [vulnerability, setVulnerability] = useState<IncumbentVulnerability | null>(null);
 
   // Enrichment section states
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
@@ -736,6 +871,7 @@ export default function RecompeteDetail() {
     incumbent: false,
     related: false,
     matched: true, // Open by default - most actionable
+    vulnerability: false,
   });
 
   const toggleSection = (section: string) => {
@@ -771,6 +907,27 @@ export default function RecompeteDetail() {
       fetchRecompete();
     }
   }, [id]);
+
+  // Fetch incumbent vulnerability when recompete loads
+  useEffect(() => {
+    const fetchVulnerability = async () => {
+      if (!recompete?.incumbent_uei) return;
+
+      try {
+        const vulnData = await getIncumbentVulnerability(
+          recompete.incumbent_uei,
+          recompete.naics_code || undefined,
+          recompete.awarding_agency_name || undefined
+        );
+        setVulnerability(vulnData);
+      } catch (err) {
+        // Silently fail - vulnerability is optional
+        console.debug("Could not fetch incumbent vulnerability:", err);
+      }
+    };
+
+    fetchVulnerability();
+  }, [recompete?.incumbent_uei, recompete?.naics_code, recompete?.awarding_agency_name]);
 
   if (isLoading) {
     return (
@@ -826,8 +983,9 @@ export default function RecompeteDetail() {
               <p className="mt-1 text-gray-500 dark:text-gray-400">
                 {recompete.awarding_agency_name}
               </p>
-              <div className="mt-3">
+              <div className="mt-3 flex flex-wrap gap-3 items-center">
                 <DaysBadge days={recompete.days_until_expiration} />
+                {vulnerability && <VulnerabilityBadge vulnerability={vulnerability} />}
               </div>
             </div>
             <div className="flex flex-col sm:flex-row gap-3">
@@ -959,6 +1117,31 @@ export default function RecompeteDetail() {
         >
           {openSections.matched && <MatchedOpportunitiesSection recompeteId={id!} />}
         </CollapsibleSection>
+
+        {/* Incumbent Vulnerability Analysis */}
+        {vulnerability && (
+          <CollapsibleSection
+            title="Incumbent Vulnerability Analysis"
+            icon={
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+              </svg>
+            }
+            isOpen={openSections.vulnerability}
+            onToggle={() => toggleSection("vulnerability")}
+            badge={
+              <span className={`px-2 py-0.5 text-xs rounded-full ${
+                vulnerability.level === "High" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" :
+                vulnerability.level === "Medium" ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400" :
+                "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+              }`}>
+                {vulnerability.level === "High" ? "Beatable" : vulnerability.level === "Medium" ? "Moderate" : "Strong"}
+              </span>
+            }
+          >
+            {openSections.vulnerability && <VulnerabilityCard vulnerability={vulnerability} />}
+          </CollapsibleSection>
+        )}
 
         {/* Incumbent Profile */}
         <CollapsibleSection

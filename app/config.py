@@ -18,7 +18,8 @@ class Settings(BaseSettings):
     app_name: str = "BidKing"
     app_env: str = "development"
     app_url: str = "http://localhost:8000"
-    debug: bool = True
+    # SECURITY: Default to False - require explicit enable in dev
+    debug: bool = False
 
     # ==========================================================================
     # Database
@@ -39,7 +40,8 @@ class Settings(BaseSettings):
     # ==========================================================================
     # Security
     # ==========================================================================
-    secret_key: str = "change-this-in-production"
+    # SECURITY: Must be changed in production (min 32 chars recommended)
+    secret_key: str = "change-this-in-production-use-a-secure-random-key"
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
@@ -82,11 +84,18 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
 
     # ==========================================================================
+    # Sync Secret (for local-to-production data sync)
+    # ==========================================================================
+    sync_secret: str = ""  # Set via SYNC_SECRET env var for authenticated sync
+
+    # ==========================================================================
     # Resend (Email)
     # ==========================================================================
     resend_api_key: str = ""
     from_email: str = "alerts@bidking.com"
     from_name: str = "BidKing"
+    email_domain: str = "bidking.ai"  # Domain for email addresses (alerts@bidking.ai)
+    frontend_url: str = "https://bidking-web.fly.dev"  # Frontend URL for email links
 
     # ==========================================================================
     # CORS
@@ -132,6 +141,8 @@ SUBSCRIPTION_TIERS = {
             "keywords_per_profile": 5,
             "states_per_profile": 1,
             "api_calls_per_hour": 100,
+            "ai_generations_per_day": 3,
+            "ai_tokens_per_month": 50000,
         },
         "features": {
             "instant_alerts": False,
@@ -159,6 +170,8 @@ SUBSCRIPTION_TIERS = {
             "keywords_per_profile": 20,
             "states_per_profile": 10,
             "api_calls_per_hour": 500,
+            "ai_generations_per_day": 20,
+            "ai_tokens_per_month": 500000,
         },
         "features": {
             "instant_alerts": True,
@@ -186,6 +199,8 @@ SUBSCRIPTION_TIERS = {
             "keywords_per_profile": 100,
             "states_per_profile": 50,
             "api_calls_per_hour": 2000,
+            "ai_generations_per_day": 100,
+            "ai_tokens_per_month": 2000000,
         },
         "features": {
             "instant_alerts": True,

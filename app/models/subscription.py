@@ -78,21 +78,27 @@ class UsageTracking(Base):
     # User relationship
     user_id = Column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
 
-    # Period (first of month)
-    month = Column(DateTime, nullable=False)
+    # Period tracking
+    period_start = Column(DateTime, nullable=False)  # First of month
+    period_end = Column(DateTime, nullable=True)  # Last of month
 
     # Usage counters
     alerts_sent = Column(Integer, default=0)
     searches_performed = Column(Integer, default=0)
     exports_performed = Column(Integer, default=0)
     api_calls = Column(Integer, default=0)
+    opportunities_viewed = Column(Integer, default=0)
+
+    # AI generation tracking
+    ai_generations = Column(Integer, default=0)
+    ai_tokens_used = Column(Integer, default=0)
 
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     class Meta:
-        unique_together = ("user_id", "month")
+        unique_together = ("user_id", "period_start")
 
     def __repr__(self):
-        return f"<UsageTracking {self.user_id} - {self.month}>"
+        return f"<UsageTracking {self.user_id} - {self.period_start}>"

@@ -19,25 +19,15 @@ interface FilterStats {
   top_naics: { code: string; count: number }[];
 }
 
-// Score badge component
-function ScoreBadge({ score, label }: { score: number; label?: string }) {
-  const getScoreColor = () => {
-    if (score >= 70) return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400";
-    if (score >= 40) return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400";
-    return "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400";
-  };
-
-  const getScoreLabel = () => {
-    if (label) return label;
-    if (score >= 70) return "High";
-    if (score >= 40) return "Medium";
-    return "Low";
-  };
-
+// Score badge component - unified purple "Your Fit" style
+function ScoreBadge({ score }: { score: number }) {
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded ${getScoreColor()}`}>
+    <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400">
+      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+      </svg>
       <span className="font-bold">{score}</span>
-      <span className="text-xs opacity-75">{getScoreLabel()}</span>
+      <span className="text-xs opacity-75">Your Fit</span>
     </span>
   );
 }
@@ -179,12 +169,20 @@ export default function OpportunitiesList() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [filterStats, setFilterStats] = useState<FilterStats | null>(null);
   const [naicsFilter, setNaicsFilter] = useState("");
+  const [lowCompetitionMode, setLowCompetitionMode] = useState(false);
   const [agencyFilter, setAgencyFilter] = useState("");
+
+  // Low competition / underserved NAICS codes
+  const LOW_COMPETITION_NAICS = ["541611", "519190", "611430", "541910", "541618"];
   const [setAsideFilter, setSetAsideFilter] = useState("");
   const [stateFilter, setStateFilter] = useState("");
   const [minValue, setMinValue] = useState("");
   const [maxValue, setMaxValue] = useState("");
   const [hasValueEstimate, setHasValueEstimate] = useState<"all" | "yes" | "no">("all");
+  const [hasAiAnalysis, setHasAiAnalysis] = useState<"all" | "yes" | "no">("all");
+  const [noticeTypeFilter, setNoticeTypeFilter] = useState("");
+  const [earlyStageOnly, setEarlyStageOnly] = useState(false);
+  const [includeExpired, setIncludeExpired] = useState(false);
 
   // Personalized scores state
   const [personalizedScores, setPersonalizedScores] = useState<Record<string, OpportunityScore>>({});
@@ -205,13 +203,25 @@ export default function OpportunitiesList() {
       params.append("sort_order", currentOrder);
 
       if (searchInput) params.append("query", searchInput);
-      if (naicsFilter) params.append("naics_codes", naicsFilter);
+      // Low competition mode overrides manual NAICS filter
+      // Backend expects repeated params: naics_codes=X&naics_codes=Y (not comma-separated)
+      if (lowCompetitionMode) {
+        LOW_COMPETITION_NAICS.forEach(code => params.append("naics_codes", code));
+      } else if (naicsFilter) {
+        params.append("naics_codes", naicsFilter);
+      }
       if (stateFilter) params.append("states", stateFilter);
       if (setAsideFilter) params.append("set_aside_types", setAsideFilter);
       if (minValue) params.append("min_value", minValue);
       if (maxValue) params.append("max_value", maxValue);
       if (hasValueEstimate === "yes") params.append("has_value_estimate", "true");
       if (hasValueEstimate === "no") params.append("has_value_estimate", "false");
+      if (hasAiAnalysis === "yes") params.append("has_ai_analysis", "true");
+      if (hasAiAnalysis === "no") params.append("has_ai_analysis", "false");
+      if (agencyFilter) params.append("agencies", agencyFilter);
+      if (noticeTypeFilter) params.append("notice_types", noticeTypeFilter);
+      if (earlyStageOnly) params.append("early_stage_only", "true");
+      if (includeExpired) params.append("include_expired", "true");
 
       const response = await fetch(
         `${import.meta.env.VITE_API_URL || "https://api.bidking.ai/api/v1"}/opportunities?${params}`
@@ -230,7 +240,7 @@ export default function OpportunitiesList() {
     } finally {
       setIsLoading(false);
     }
-  }, [page, pageSize, currentSort, currentOrder, searchInput, naicsFilter, stateFilter, setAsideFilter, minValue, maxValue, hasValueEstimate]);
+  }, [page, pageSize, currentSort, currentOrder, searchInput, naicsFilter, lowCompetitionMode, stateFilter, setAsideFilter, minValue, maxValue, hasValueEstimate, hasAiAnalysis, agencyFilter, noticeTypeFilter, earlyStageOnly, includeExpired]);
 
   // Fetch personalized scores for authenticated users
   const fetchPersonalizedScores = useCallback(async (opportunityIds: string[]) => {
@@ -334,12 +344,25 @@ export default function OpportunitiesList() {
   const handleClearAll = () => {
     setSearchInput("");
     setNaicsFilter("");
+    setLowCompetitionMode(false);
     setAgencyFilter("");
     setSetAsideFilter("");
     setStateFilter("");
     setMinValue("");
     setMaxValue("");
     setHasValueEstimate("all");
+    setHasAiAnalysis("all");
+    setNoticeTypeFilter("");
+    setEarlyStageOnly(false);
+    setIncludeExpired(false);
+    setPage(1);
+  };
+
+  const handleLowCompetitionToggle = () => {
+    setLowCompetitionMode(!lowCompetitionMode);
+    if (!lowCompetitionMode) {
+      setNaicsFilter(""); // Clear manual NAICS when enabling low competition
+    }
     setPage(1);
   };
 
@@ -379,12 +402,17 @@ export default function OpportunitiesList() {
   const activeFilterCount = [
     searchInput,
     naicsFilter,
+    lowCompetitionMode ? "lowComp" : "",
     agencyFilter,
     setAsideFilter,
     stateFilter,
     minValue,
     maxValue,
     hasValueEstimate !== "all" ? "hasValue" : "",
+    hasAiAnalysis !== "all" ? "hasAi" : "",
+    noticeTypeFilter,
+    earlyStageOnly ? "earlyStage" : "",
+    includeExpired ? "expired" : "",
   ].filter(Boolean).length;
 
   const totalPages = Math.ceil(total / pageSize);
@@ -410,6 +438,26 @@ export default function OpportunitiesList() {
     "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "DC"
   ];
 
+  // Notice types
+  const noticeTypes = [
+    { value: "Solicitation", label: "Solicitation" },
+    { value: "Sources Sought", label: "Sources Sought" },
+    { value: "Presolicitation", label: "Presolicitation" },
+    { value: "Combined Synopsis/Solicitation", label: "Combined Synopsis/Solicitation" },
+    { value: "Award Notice", label: "Award Notice" },
+    { value: "Special Notice", label: "Special Notice" },
+    { value: "Intent to Bundle Requirements", label: "Intent to Bundle" },
+  ];
+
+  // Sort options for dropdown
+  const sortOptions = [
+    { value: "posted_date", label: "Posted Date (Newest)" },
+    { value: "response_deadline", label: "Deadline (Soonest)" },
+    { value: "ai_estimated_value_high", label: "Value (Highest)" },
+    { value: "likelihood_score", label: "Score (Best Match)" },
+    { value: "title", label: "Title (A-Z)" },
+  ];
+
   return (
     <>
       <PageMeta title="Opportunities | BidKing" description="Browse federal contract opportunities" />
@@ -430,8 +478,23 @@ export default function OpportunitiesList() {
                   onChange={(e) => setSearchInput(e.target.value)}
                 />
               </div>
-              {/* Min Score removed for simpler UI */}
-              <div className="flex gap-2 lg:self-end">
+              {/* Quick filters and search buttons */}
+              <div className="flex gap-2 lg:self-end flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleLowCompetitionToggle}
+                  className={`px-4 py-2.5 text-sm rounded-lg flex items-center gap-2 transition-colors ${
+                    lowCompetitionMode
+                      ? "bg-green-600 text-white hover:bg-green-700"
+                      : "border border-green-600 text-green-600 hover:bg-green-50 dark:border-green-500 dark:text-green-500 dark:hover:bg-green-900/20"
+                  }`}
+                  title="Filter to underserved NAICS codes with lower competition"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                  </svg>
+                  Low Competition
+                </button>
                 <Button type="submit" size="sm">
                   Search
                 </Button>
@@ -544,7 +607,19 @@ export default function OpportunitiesList() {
                 </div>
 
                 {/* AI Estimated Value Filters */}
-                <div className="grid grid-cols-1 gap-4 mt-4 md:grid-cols-3">
+                <div className="grid grid-cols-1 gap-4 mt-4 md:grid-cols-5">
+                  <div>
+                    <Label>Notice Type</Label>
+                    <SearchableSelect
+                      options={noticeTypes.map((nt) => ({
+                        value: nt.value,
+                        label: nt.label,
+                      }))}
+                      placeholder="All Notice Types"
+                      value={noticeTypeFilter}
+                      onChange={setNoticeTypeFilter}
+                    />
+                  </div>
                   <div>
                     <Label>Min Estimated Value ($)</Label>
                     <Input
@@ -575,6 +650,18 @@ export default function OpportunitiesList() {
                       <option value="no">Without AI Estimate</option>
                     </select>
                   </div>
+                  <div>
+                    <Label>Has AI Analysis</Label>
+                    <select
+                      value={hasAiAnalysis}
+                      onChange={(e) => setHasAiAnalysis(e.target.value as "all" | "yes" | "no")}
+                      className="w-full h-11 px-4 py-2.5 text-sm bg-transparent border border-gray-300 rounded-lg appearance-none dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
+                    >
+                      <option value="all">All Opportunities</option>
+                      <option value="yes">With AI Analysis Only</option>
+                      <option value="no">Without AI Analysis</option>
+                    </select>
+                  </div>
                 </div>
 
                 {/* Stats Summary */}
@@ -600,11 +687,58 @@ export default function OpportunitiesList() {
           </form>
         </div>
 
-        {/* Results summary */}
-        <div className="flex items-center justify-between">
+        {/* Results summary and Sort Dropdown */}
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-gray-600 dark:text-gray-400">
             Showing {opportunities.length} of {total} opportunities
           </p>
+          <div className="flex items-center gap-4">
+            {/* Early Stage Toggle */}
+            <button
+              type="button"
+              onClick={() => { setEarlyStageOnly(!earlyStageOnly); setPage(1); }}
+              className={`px-3 py-1.5 text-xs rounded-lg flex items-center gap-1.5 transition-colors ${
+                earlyStageOnly
+                  ? "bg-purple-600 text-white hover:bg-purple-700"
+                  : "border border-purple-500 text-purple-600 hover:bg-purple-50 dark:border-purple-400 dark:text-purple-400 dark:hover:bg-purple-900/20"
+              }`}
+              title="Show only Sources Sought & Presolicitation opportunities"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Early Stage
+            </button>
+            {/* Include Expired Toggle */}
+            <button
+              type="button"
+              onClick={() => { setIncludeExpired(!includeExpired); setPage(1); }}
+              className={`px-3 py-1.5 text-xs rounded-lg flex items-center gap-1.5 transition-colors ${
+                includeExpired
+                  ? "bg-orange-600 text-white hover:bg-orange-700"
+                  : "border border-orange-500 text-orange-600 hover:bg-orange-50 dark:border-orange-400 dark:text-orange-400 dark:hover:bg-orange-900/20"
+              }`}
+              title="Include opportunities past their deadline"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+              Include Expired
+            </button>
+            {/* Sort Dropdown */}
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">Sort by:</label>
+              <select
+                value={currentSort}
+                onChange={(e) => { setCurrentSort(e.target.value); setCurrentOrder(e.target.value === "title" ? "asc" : "desc"); }}
+                className="h-9 px-3 py-1.5 text-sm bg-transparent border border-gray-300 rounded-lg appearance-none dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:text-white"
+              >
+                {sortOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
         </div>
 
         {/* Error state */}
@@ -655,6 +789,13 @@ export default function OpportunitiesList() {
                       onSort={handleColumnSort}
                     />
                     <SortableHeader
+                      column="posted_date"
+                      label="Posted"
+                      currentSort={currentSort}
+                      currentOrder={currentOrder}
+                      onSort={handleColumnSort}
+                    />
+                    <SortableHeader
                       column="response_deadline"
                       label="Deadline"
                       currentSort={currentSort}
@@ -669,7 +810,7 @@ export default function OpportunitiesList() {
                 <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                   {sortedOpportunities.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
+                      <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
                         No opportunities found. Try adjusting your search filters.
                       </td>
                     </tr>
@@ -715,12 +856,17 @@ export default function OpportunitiesList() {
                           )}
                         </td>
                         <td className="px-6 py-4">
-                          {/* Show personalized score if available, otherwise show generic */}
+                          {/* Show personalized score if available, otherwise use likelihood_score - unified format */}
                           {isAuthenticated && personalizedScores[opp.id] ? (
                             <PersonalizedScoreBadge score={personalizedScores[opp.id]} />
                           ) : (
-                            <ScoreBadge score={opp.likelihood_score} />
+                            <ScoreBadge score={opp.likelihood_score || 50} />
                           )}
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="text-sm text-gray-900 dark:text-white">
+                            {formatDate(opp.posted_date)}
+                          </div>
                         </td>
                         <td className="px-6 py-4">
                           <div className="text-sm text-gray-900 dark:text-white">

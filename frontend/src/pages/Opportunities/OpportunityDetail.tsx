@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router";
 import { useOpportunitiesStore } from "../../stores/opportunitiesStore";
 import { useAuthStore } from "../../stores/authStore";
-import { opportunitiesApi, OpportunityScore } from "../../api/opportunities";
+import { opportunitiesApi, OpportunityScore, getWinProbability, WinProbability } from "../../api/opportunities";
 import PageBreadcrumb from "../../components/common/PageBreadCrumb";
 import PageMeta from "../../components/common/PageMeta";
 import Button from "../../components/ui/button/Button";
@@ -102,6 +102,77 @@ function PersonalizedScoreCard({ score }: { score: OpportunityScore }) {
   );
 }
 
+// Win Probability Card component
+function WinProbabilityCard({ winProbability }: { winProbability: WinProbability }) {
+  const getProbabilityColor = (prob: number) => {
+    if (prob >= 70) return "text-green-600 dark:text-green-400";
+    if (prob >= 40) return "text-yellow-600 dark:text-yellow-400";
+    return "text-red-600 dark:text-red-400";
+  };
+
+  const getProbabilityBg = (prob: number) => {
+    if (prob >= 70) return "bg-green-100 dark:bg-green-900/40";
+    if (prob >= 40) return "bg-yellow-100 dark:bg-yellow-900/40";
+    return "bg-red-100 dark:bg-red-900/40";
+  };
+
+  const getConfidenceBadge = (confidence: string) => {
+    const colors: Record<string, string> = {
+      high: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
+      medium: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
+      low: "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400",
+    };
+    return colors[confidence] || colors.low;
+  };
+
+  const getImpactColor = (impact: number) => {
+    if (impact > 0) return "text-green-600 dark:text-green-400";
+    if (impact < 0) return "text-red-600 dark:text-red-400";
+    return "text-gray-500";
+  };
+
+  return (
+    <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+      <div className="flex items-center gap-3 mb-3">
+        <div className={`flex items-center justify-center w-14 h-14 ${getProbabilityBg(winProbability.probability)} rounded-full`}>
+          <span className={`text-2xl font-bold ${getProbabilityColor(winProbability.probability)}`}>
+            {winProbability.probability}%
+          </span>
+        </div>
+        <div>
+          <div className="font-semibold text-blue-900 dark:text-blue-100 flex items-center gap-2">
+            Win Probability
+            <span className={`px-2 py-0.5 text-xs rounded-full ${getConfidenceBadge(winProbability.confidence)}`}>
+              {winProbability.confidence} confidence
+            </span>
+          </div>
+          <div className="text-sm text-blue-700 dark:text-blue-300">{winProbability.recommendation}</div>
+        </div>
+      </div>
+
+      {/* Factors breakdown */}
+      <div className="space-y-2 mt-4">
+        <div className="text-xs font-medium text-blue-800 dark:text-blue-300 uppercase">Contributing Factors</div>
+        <div className="space-y-1.5">
+          {winProbability.factors.map((factor, idx) => (
+            <div key={idx} className="flex items-center justify-between text-sm bg-white dark:bg-gray-800/50 rounded px-2 py-1.5">
+              <div className="flex-1 min-w-0">
+                <span className="text-gray-700 dark:text-gray-300">{factor.name}</span>
+                <span className="text-xs text-gray-500 dark:text-gray-400 ml-2 truncate block sm:inline sm:ml-2">
+                  {factor.detail}
+                </span>
+              </div>
+              <span className={`font-medium ml-2 ${getImpactColor(factor.impact)}`}>
+                {factor.impact > 0 ? '+' : ''}{factor.impact}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Format date helper
 function formatDate(dateString: string | null | undefined): string {
   if (!dateString) return "N/A";
@@ -195,11 +266,14 @@ function InfoRow({ label, value, className = "" }: { label: string; value: React
 export default function OpportunityDetail() {
   const { id } = useParams<{ id: string }>();
   const { selectedOpportunity, isLoading, error, fetchOpportunity, saveOpportunity } = useOpportunitiesStore();
-  const { isAuthenticated } = useAuthStore();
+  const { isAuthenticated, session } = useAuthStore();
   const [isSaving, setIsSaving] = useState(false);
   const [personalizedScore, setPersonalizedScore] = useState<OpportunityScore | null>(null);
+  const [winProbability, setWinProbability] = useState<WinProbability | null>(null);
   const [aiSummary, setAiSummary] = useState<AISummary | null>(null);
   const [aiSummaryLoading, setAiSummaryLoading] = useState(false);
+  const [isGeneratingMatrix, setIsGeneratingMatrix] = useState(false);
+  const [complianceMatrix, setComplianceMatrix] = useState<any>(null);
 
   useEffect(() => {
     if (id) {
@@ -254,6 +328,23 @@ export default function OpportunityDetail() {
     fetchPersonalizedScore();
   }, [id, isAuthenticated]);
 
+  // Fetch win probability for authenticated users
+  useEffect(() => {
+    const fetchWinProb = async () => {
+      if (!id || !isAuthenticated) return;
+
+      try {
+        const probResponse = await getWinProbability(id);
+        setWinProbability(probResponse);
+      } catch (err) {
+        // Silently fail - win probability is optional
+        console.debug("Could not fetch win probability:", err);
+      }
+    };
+
+    fetchWinProb();
+  }, [id, isAuthenticated]);
+
   const handleSave = async () => {
     if (!id) return;
     setIsSaving(true);
@@ -264,6 +355,43 @@ export default function OpportunityDetail() {
       toast.error("Failed to save opportunity");
     }
     setIsSaving(false);
+  };
+
+  const handleGenerateMatrix = async () => {
+    if (!id || !isAuthenticated) {
+      toast.error("Please sign in to generate a compliance matrix");
+      return;
+    }
+    setIsGeneratingMatrix(true);
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL || 'https://api.bidking.ai/api/v1';
+      const response = await fetch(`${apiUrl}/proposals/compliance-matrix/${id}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session?.access_token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.status === 429) {
+        const error = await response.json();
+        toast.error(error.detail?.message || "Rate limit exceeded. Try again later.");
+        return;
+      }
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || "Failed to generate compliance matrix");
+      }
+
+      const data = await response.json();
+      setComplianceMatrix(data);
+      toast.success("Compliance matrix generated!");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to generate compliance matrix");
+    } finally {
+      setIsGeneratingMatrix(false);
+    }
   };
 
   if (isLoading) {
@@ -339,6 +467,10 @@ export default function OpportunityDetail() {
               </div>
             </div>
             <div className="flex flex-col gap-3">
+              {/* Show win probability card if available */}
+              {winProbability && (
+                <WinProbabilityCard winProbability={winProbability} />
+              )}
               {/* Show personalized score card if available */}
               {personalizedScore && (
                 <PersonalizedScoreCard score={personalizedScore} />
@@ -346,14 +478,25 @@ export default function OpportunityDetail() {
               {/* Generic score badge */}
               <div>
                 <div className="text-xs text-gray-500 mb-1">
-                  {personalizedScore ? "Generic Score" : "Likelihood Score"}
+                  {personalizedScore || winProbability ? "Generic Score" : "Likelihood Score"}
                 </div>
                 <ScoreBadge score={opp.likelihood_score} />
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button size="sm" onClick={handleSave} disabled={isSaving}>
                   {isSaving ? "Saving..." : "Save to Pipeline"}
                 </Button>
+                {isAuthenticated && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleGenerateMatrix}
+                    disabled={isGeneratingMatrix}
+                    className="bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100 dark:bg-purple-900/20 dark:border-purple-700 dark:text-purple-300"
+                  >
+                    {isGeneratingMatrix ? "Generating..." : "Generate Compliance Matrix"}
+                  </Button>
+                )}
                 {opp.ui_link && (
                   <a
                     href={opp.ui_link}
@@ -447,6 +590,41 @@ export default function OpportunityDetail() {
                     View Full Description on SAM.gov
                   </a>
                 </div>
+              ) : opp.description.includes("<p>") ? (
+                // Extract HTML content - works for both clean HTML and malformed Python dict strings
+                (() => {
+                  // Find HTML content from first <p> to last closing tag
+                  const startIdx = opp.description.indexOf("<p>");
+                  const lastPIdx = opp.description.lastIndexOf("</p>");
+                  const lastOlIdx = opp.description.lastIndexOf("</ol>");
+                  const lastUlIdx = opp.description.lastIndexOf("</ul>");
+                  const endIdx = Math.max(lastPIdx, lastOlIdx, lastUlIdx);
+
+                  if (startIdx !== -1 && endIdx !== -1) {
+                    // Get the closing tag length
+                    let closeLen = 4; // </p>
+                    if (endIdx === lastOlIdx) closeLen = 5; // </ol>
+                    if (endIdx === lastUlIdx) closeLen = 5; // </ul>
+
+                    const htmlContent = opp.description
+                      .substring(startIdx, endIdx + closeLen)
+                      .replace(/\\n/g, '\n')
+                      .replace(/&nbsp;/g, ' ')
+                      .replace(/&ldquo;/g, '"')
+                      .replace(/&rdquo;/g, '"')
+                      .replace(/&rsquo;/g, "'")
+                      .replace(/&lsquo;/g, "'")
+                      .replace(/&ndash;/g, '–')
+                      .replace(/&mdash;/g, '—');
+                    return (
+                      <div
+                        className="text-gray-700 dark:text-gray-300 [&>p]:mb-4 [&>ul]:list-disc [&>ul]:ml-6 [&>ul]:mb-4 [&>ol]:list-decimal [&>ol]:ml-6 [&>ol]:mb-4 [&_li]:mb-1 [&_strong]:font-semibold [&_u]:underline [&_a]:text-blue-600 [&_a]:underline"
+                        dangerouslySetInnerHTML={{ __html: htmlContent }}
+                      />
+                    );
+                  }
+                  return <p className="whitespace-pre-wrap text-gray-700 dark:text-gray-300">{opp.description}</p>;
+                })()
               ) : (
                 <p className="whitespace-pre-wrap text-gray-700 dark:text-gray-300">{opp.description}</p>
               )
@@ -791,6 +969,124 @@ export default function OpportunityDetail() {
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Compliance Matrix (Generated) */}
+        {complianceMatrix && complianceMatrix.matrix && (
+          <div className="p-6 bg-white rounded-lg shadow dark:bg-gray-800">
+            <SectionHeader title="Compliance Matrix" icon="📊" />
+            <div className="space-y-6">
+              {/* Summary */}
+              {complianceMatrix.matrix.summary && (
+                <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-6">
+                  <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg text-center">
+                    <div className="text-2xl font-bold text-gray-900 dark:text-white">{complianceMatrix.matrix.summary.total_requirements || 0}</div>
+                    <div className="text-xs text-gray-500">Total Requirements</div>
+                  </div>
+                  <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg text-center">
+                    <div className="text-2xl font-bold text-red-600">{complianceMatrix.matrix.summary.mandatory || 0}</div>
+                    <div className="text-xs text-gray-500">Mandatory</div>
+                  </div>
+                  <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg text-center">
+                    <div className="text-2xl font-bold text-green-600">{complianceMatrix.matrix.summary.full_compliance || 0}</div>
+                    <div className="text-xs text-gray-500">Full Compliance</div>
+                  </div>
+                  <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg text-center">
+                    <div className="text-2xl font-bold text-yellow-600">{complianceMatrix.matrix.summary.partial_compliance || 0}</div>
+                    <div className="text-xs text-gray-500">Partial</div>
+                  </div>
+                  <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg text-center">
+                    <div className="text-2xl font-bold text-red-600">{complianceMatrix.matrix.summary.gaps || 0}</div>
+                    <div className="text-xs text-gray-500">Gaps</div>
+                  </div>
+                  <div className="p-3 bg-blue-50 dark:bg-blue-900/30 rounded-lg text-center">
+                    <div className="text-2xl font-bold text-blue-600">{complianceMatrix.matrix.summary.fit_score || 0}%</div>
+                    <div className="text-xs text-gray-500">Fit Score</div>
+                  </div>
+                </div>
+              )}
+
+              {/* Strengths & Gaps */}
+              <div className="grid gap-4 md:grid-cols-2">
+                {complianceMatrix.matrix.strengths && complianceMatrix.matrix.strengths.length > 0 && (
+                  <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                    <h4 className="font-semibold text-green-800 dark:text-green-300 mb-2">Strengths</h4>
+                    <ul className="space-y-1 text-sm text-green-700 dark:text-green-400">
+                      {complianceMatrix.matrix.strengths.map((s: string, i: number) => (
+                        <li key={i}>✓ {s}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {complianceMatrix.matrix.critical_gaps && complianceMatrix.matrix.critical_gaps.length > 0 && (
+                  <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                    <h4 className="font-semibold text-red-800 dark:text-red-300 mb-2">Critical Gaps</h4>
+                    <ul className="space-y-1 text-sm text-red-700 dark:text-red-400">
+                      {complianceMatrix.matrix.critical_gaps.map((g: string, i: number) => (
+                        <li key={i}>✗ {g}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              {/* Requirements Table */}
+              {complianceMatrix.matrix.requirements && complianceMatrix.matrix.requirements.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 dark:bg-gray-700">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Ref</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Requirement</th>
+                        <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Type</th>
+                        <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Status</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Approach</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                      {complianceMatrix.matrix.requirements.map((req: any, i: number) => (
+                        <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                          <td className="px-3 py-2 text-xs font-mono text-gray-500">{req.reference}</td>
+                          <td className="px-3 py-2 text-gray-900 dark:text-white">{req.requirement_text}</td>
+                          <td className="px-3 py-2 text-center">
+                            <span className={`px-2 py-0.5 text-xs rounded ${
+                              req.type === 'M' ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' :
+                              req.type === 'D' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' :
+                              'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-400'
+                            }`}>
+                              {req.type === 'M' ? 'Mandatory' : req.type === 'D' ? 'Desirable' : 'Info'}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            <span className={`px-2 py-0.5 text-xs rounded ${
+                              req.compliance === 'Full' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
+                              req.compliance === 'Partial' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                              'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+                            }`}>
+                              {req.compliance}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-gray-600 dark:text-gray-400 text-xs">{req.approach}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Recommendations */}
+              {complianceMatrix.matrix.recommendations && complianceMatrix.matrix.recommendations.length > 0 && (
+                <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                  <h4 className="font-semibold text-blue-800 dark:text-blue-300 mb-2">Recommendations</h4>
+                  <ul className="space-y-1 text-sm text-blue-700 dark:text-blue-400">
+                    {complianceMatrix.matrix.recommendations.map((r: string, i: number) => (
+                      <li key={i}>→ {r}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           </div>
         )}

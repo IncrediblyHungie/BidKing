@@ -210,6 +210,17 @@ class SavedOpportunityUpdate(BaseModel):
     priority: Optional[int] = Field(None, ge=1, le=5)
     reminder_date: Optional[date] = None
 
+    # Win tracking (when status = 'won')
+    win_amount: Optional[Decimal] = None
+    win_date: Optional[date] = None
+
+    # Loss tracking (when status = 'lost')
+    winner_name: Optional[str] = Field(None, max_length=255)
+    loss_reason: Optional[str] = Field(None, max_length=2000)
+
+    # Feedback notes (for win or loss - lessons learned)
+    feedback_notes: Optional[str] = Field(None, max_length=5000)
+
     @classmethod
     def validate_status(cls, v: Optional[str]) -> Optional[str]:
         """Validate status value."""
@@ -231,6 +242,18 @@ class SavedOpportunityResponse(BaseModel):
     priority: int = 3
     reminder_date: Optional[date] = None
     stage_changed_at: Optional[datetime] = None
+
+    # Win tracking
+    win_amount: Optional[Decimal] = None
+    win_date: Optional[date] = None
+
+    # Loss tracking
+    winner_name: Optional[str] = None
+    loss_reason: Optional[str] = None
+
+    # Feedback notes
+    feedback_notes: Optional[str] = None
+
     created_at: datetime
     updated_at: datetime
 

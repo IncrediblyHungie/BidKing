@@ -131,6 +131,23 @@ class Opportunity(Base):
     ui_link = Column(Text, nullable=True)  # Link to SAM.gov page
 
     # ==========================================================================
+    # Amendment Tracking
+    # ==========================================================================
+
+    # Previous deadline (before most recent amendment)
+    previous_response_deadline = Column(DateTime, nullable=True)
+
+    # Count of amendments (incremented each time key fields change)
+    amendment_count = Column(Integer, default=0, index=True)
+
+    # When the last amendment occurred
+    last_amendment_date = Column(DateTime, nullable=True)
+
+    # Amendment history - JSON array of all changes
+    # [{date: "...", field: "response_deadline", old_value: "...", new_value: "...", change_type: "deadline_extended"}]
+    amendment_history = Column(JSONArray(), nullable=True)
+
+    # ==========================================================================
     # Status
     # ==========================================================================
 
@@ -240,6 +257,17 @@ class SavedOpportunity(Base):
 
     # Stage changed timestamp (for tracking how long in each stage)
     stage_changed_at = Column(DateTime, default=datetime.utcnow)
+
+    # Win tracking (when status = 'won')
+    win_amount = Column(Numeric(15, 2), nullable=True)
+    win_date = Column(Date, nullable=True)
+
+    # Loss tracking (when status = 'lost')
+    winner_name = Column(String(255), nullable=True)  # Who won the contract
+    loss_reason = Column(Text, nullable=True)
+
+    # Feedback notes (for win or loss - lessons learned)
+    feedback_notes = Column(Text, nullable=True)
 
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)

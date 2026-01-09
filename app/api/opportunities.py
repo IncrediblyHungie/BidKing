@@ -15,7 +15,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, and_, func
 
-from app.api.deps import get_db, get_current_user, get_optional_user, rate_limit_search
+from app.api.deps import get_db, get_current_user, get_optional_user, rate_limit_search, require_starter
 from app.models import User, Opportunity, SavedOpportunity, PointOfContact, OpportunityAttachment, OpportunityHistory
 from app.models.company import OpportunityScore
 from app.schemas.opportunity import (
@@ -55,6 +55,7 @@ async def list_opportunities(
     min_value: Optional[int] = Query(None, ge=0, description="Minimum AI estimated value"),
     max_value: Optional[int] = Query(None, ge=0, description="Maximum AI estimated value"),
     has_value_estimate: Optional[bool] = Query(None, description="Filter to only opportunities with AI value estimates"),
+    has_ai_analysis: Optional[bool] = Query(None, description="Filter to only opportunities with AI analysis from PDF attachments"),
     include_expired: bool = Query(False, description="Include opportunities with past deadlines"),
     # Pagination
     page: int = Query(1, ge=1),
@@ -165,6 +166,20 @@ async def list_opportunities(
             Opportunity.ai_estimated_value_low.is_(None),
             Opportunity.ai_estimated_value_high.is_(None),
         )
+
+    # AI Analysis filter - check if any attachment has ai_summary
+    if has_ai_analysis is True:
+        # Subquery: opportunity IDs that have at least one attachment with AI summary
+        ai_analyzed_subquery = db.query(OpportunityAttachment.opportunity_id).filter(
+            OpportunityAttachment.ai_summary.isnot(None)
+        ).distinct().subquery()
+        base_query = base_query.filter(Opportunity.id.in_(ai_analyzed_subquery))
+    elif has_ai_analysis is False:
+        # Subquery: opportunity IDs that have at least one attachment with AI summary
+        ai_analyzed_subquery = db.query(OpportunityAttachment.opportunity_id).filter(
+            OpportunityAttachment.ai_summary.isnot(None)
+        ).distinct().subquery()
+        base_query = base_query.filter(~Opportunity.id.in_(ai_analyzed_subquery))
 
     if min_value is not None:
         # Use high estimate if available, otherwise low
@@ -373,10 +388,12 @@ async def export_opportunities_csv(
     has_value_estimate: Optional[bool] = Query(None),
     include_expired: bool = Query(False, description="Include opportunities with past deadlines"),
     db: Session = Depends(get_db),
+    _: User = Depends(require_starter),  # Requires Starter or Pro tier
 ):
     """
     Export opportunities as CSV file.
 
+    Requires Starter or Pro subscription tier.
     Supports the same filters as the list endpoint.
     Returns up to 10,000 records.
     By default, excludes opportunities with past deadlines.
@@ -616,6 +633,56 @@ async def get_opportunity_score(
     }
 
 
+@router.get("/{opportunity_id}/win-probability")
+async def get_win_probability(
+    opportunity_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Get personalized win probability for a specific opportunity.
+
+    Calculates probability (0-100) of winning based on:
+    - Set-aside match with user's certifications
+    - NAICS code experience level
+    - Historical competition levels
+    - Incumbent presence (for recompetes)
+    - Contract size fit
+    - Past performance relevance
+    - Timeline feasibility
+
+    Returns:
+        probability: 0-100 score
+        confidence: low/medium/high
+        factors: List of scoring factors with impact and details
+        recommendation: Human-readable recommendation
+
+    Requires authentication and completed company profile with NAICS codes.
+    """
+    from app.services.win_probability import get_win_probability_for_opportunity
+
+    result = get_win_probability_for_opportunity(
+        db,
+        str(opportunity_id),
+        str(current_user.id)
+    )
+
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Opportunity not found",
+        )
+
+    # Check for errors (incomplete profile)
+    if "error" in result:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result.get("message", result.get("error")),
+        )
+
+    return result
+
+
 # =============================================================================
 # SINGLE OPPORTUNITY ENDPOINTS
 # =============================================================================
@@ -644,10 +711,16 @@ async def get_opportunity(
         PointOfContact.opportunity_id == opportunity.id
     ).all()
 
-    # Load attachments
-    opportunity.attachments = db.query(OpportunityAttachment).filter(
+    # Load attachments - filter out failed extractions (broken URLs)
+    # Show: extracted, pending, skipped (might still be valid)
+    # Hide: failed with no text content (definitely broken)
+    all_attachments = db.query(OpportunityAttachment).filter(
         OpportunityAttachment.opportunity_id == opportunity.id
     ).all()
+    opportunity.attachments = [
+        a for a in all_attachments
+        if a.extraction_status != "failed" or a.text_content is not None
+    ]
 
     # Load history (ordered by date desc)
     opportunity.history = db.query(OpportunityHistory).filter(
@@ -850,6 +923,26 @@ async def save_opportunity(
     """
     Save an opportunity for tracking.
     """
+    from app.config import SUBSCRIPTION_TIERS
+
+    # Check saved opportunities limit (in features, not limits)
+    tier_config = SUBSCRIPTION_TIERS.get(
+        current_user.subscription_tier or "free",
+        SUBSCRIPTION_TIERS["free"]
+    )
+    saved_limit = tier_config["features"].get("saved_opportunities", 10)
+
+    current_saved_count = db.query(SavedOpportunity).filter(
+        SavedOpportunity.user_id == current_user.id
+    ).count()
+
+    if current_saved_count >= saved_limit:
+        tier_name = current_user.subscription_tier or "free"
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Saved opportunities limit reached ({saved_limit}). Upgrade your plan for more.",
+        )
+
     # Check if already saved
     existing = db.query(SavedOpportunity).filter(
         SavedOpportunity.user_id == current_user.id,
@@ -1003,11 +1096,12 @@ async def export_saved_opportunities_csv(
     status_filter: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    _: User = Depends(require_starter),  # Requires Starter or Pro tier
 ):
     """
     Export user's saved opportunities (pipeline) as CSV file.
 
-    Optionally filter by status.
+    Optionally filter by status. Requires Starter tier or higher.
     """
     query = db.query(SavedOpportunity).filter(
         SavedOpportunity.user_id == current_user.id

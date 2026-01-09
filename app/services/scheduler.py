@@ -23,11 +23,13 @@ def sync_usaspending_job():
 
     Runs daily at 6 AM UTC to fetch recent contract awards
     and create recompete opportunities for expiring contracts.
+    Uses proxy rotation via Webshare/Bright Data for reliability.
     """
     import httpx
     from app.database import SessionLocal
     from app.models import ContractAward, RecompeteOpportunity, Recipient
     from sqlalchemy.dialects.postgresql import insert
+    from app.services.proxy_manager import get_proxy_manager
 
     logger.info("Starting scheduled USAspending sync...")
 
@@ -86,6 +88,7 @@ def sync_usaspending_job():
                     "Place of Performance State",
                     "Place of Performance Zip",
                     "generated_internal_id",
+                    "Type of Set Aside",
                 ],
                 "page": 1,
                 "limit": 100,
@@ -93,9 +96,25 @@ def sync_usaspending_job():
                 "order": "desc",
             }
 
-            with httpx.Client(timeout=60.0) as client:
+            # Get proxy manager for rotation
+            proxy_manager = get_proxy_manager()
+            proxy = proxy_manager.get_proxy() if proxy_manager.has_proxies() else None
+            proxy_url = proxy.url if proxy else None
+
+            if proxy_url:
+                logger.info(f"Using proxy: {proxy.host}:{proxy.port}")
+
+            with httpx.Client(timeout=60.0, proxy=proxy_url) as client:
                 while True:
                     response = client.post(url, json=payload)
+
+                    # Track proxy success/failure
+                    if proxy:
+                        if response.status_code == 200:
+                            proxy_manager.mark_success(proxy)
+                        else:
+                            proxy_manager.mark_failure(proxy)
+
                     response.raise_for_status()
                     data = response.json()
 
@@ -132,6 +151,7 @@ def sync_usaspending_job():
                                     "pop_city": award.get("Place of Performance City"),
                                     "pop_state": award.get("Place of Performance State"),
                                     "pop_zip": award.get("Place of Performance Zip"),
+                                    "set_aside_type": award.get("Type of Set Aside"),
                                     "fetched_at": datetime.utcnow(),
                                 }
 
@@ -141,6 +161,7 @@ def sync_usaspending_job():
                                     set_={
                                         "total_obligation": stmt.excluded.total_obligation,
                                         "period_of_performance_end": stmt.excluded.period_of_performance_end,
+                                        "set_aside_type": stmt.excluded.set_aside_type,
                                         "fetched_at": stmt.excluded.fetched_at,
                                     },
                                 )
@@ -1079,24 +1100,26 @@ def start_scheduler():
         "541618",  # Other Mgmt Consulting (underserved)
     ]
 
-    # Schedule internal scraper at 2 AM and 2 PM UTC for each NAICS
+    # Schedule internal scraper TWICE DAILY to catch mid-day contract postings
+    # Morning: 2 PM UTC (9 AM EST) - catches overnight/early morning postings
+    # Afternoon: 8 PM UTC (3 PM EST) - catches mid-day postings during business hours
     for idx, naics in enumerate(scraper_naics_codes):
-        # Morning sync (2 AM + minutes offset to spread load)
-        scheduler.add_job(
-            scraper_sync_job,
-            CronTrigger(hour=2, minute=idx * 5),  # 2:00, 2:05, 2:10, etc.
-            id=f"scraper_sync_am_{naics}",
-            replace_existing=True,
-            name=f"Internal Scraper (AM) - NAICS {naics}",
-            kwargs={"naics_code": naics, "max_results": 500, "biddable_only": True},
-        )
-        # Afternoon sync (2 PM + minutes offset)
+        # Morning sync (2 PM UTC = 9 AM EST + minutes offset to spread load)
         scheduler.add_job(
             scraper_sync_job,
             CronTrigger(hour=14, minute=idx * 5),  # 14:00, 14:05, 14:10, etc.
+            id=f"scraper_sync_am_{naics}",
+            replace_existing=True,
+            name=f"Internal Scraper (AM - 9AM EST) - NAICS {naics}",
+            kwargs={"naics_code": naics, "max_results": 500, "biddable_only": True},
+        )
+        # Afternoon sync (8 PM UTC = 3 PM EST + minutes offset)
+        scheduler.add_job(
+            scraper_sync_job,
+            CronTrigger(hour=20, minute=idx * 5),  # 20:00, 20:05, 20:10, etc.
             id=f"scraper_sync_pm_{naics}",
             replace_existing=True,
-            name=f"Internal Scraper (PM) - NAICS {naics}",
+            name=f"Internal Scraper (PM - 3PM EST) - NAICS {naics}",
             kwargs={"naics_code": naics, "max_results": 500, "biddable_only": True},
         )
 
@@ -1138,56 +1161,58 @@ def start_scheduler():
         name="Send pipeline reminder emails",
     )
 
-    # AI summarization runs every 4 hours to keep summaries up-to-date
-    # This ensures new opportunities get summarized quickly
-    scheduler.add_job(
-        ai_summarization_job,
-        CronTrigger(hour="0,4,8,12,16,20", minute=30),
-        id="ai_summarization",
-        replace_existing=True,
-        name="AI summarize PDF attachments",
-    )
-
-    # Also run AI summarization on startup (60 seconds after start, after PDF extraction)
-    # This catches any PDFs that were extracted but not yet summarized
-    scheduler.add_job(
-        ai_summarization_job,
-        "date",
-        run_date=datetime.utcnow() + timedelta(seconds=60),
-        id="ai_summarization_startup",
-        replace_existing=True,
-        name="AI summarize PDFs (startup)",
-    )
+    # AI summarization DISABLED on production - local Ollama handles this
+    # The local scraper pipeline runs AI analysis with qwen2.5:14b-instruct
+    # and syncs results to production via bulk-import
+    #
+    # Original config (uses Anthropic Claude API which requires credits):
+    # scheduler.add_job(
+    #     ai_summarization_job,
+    #     CronTrigger(hour="0,4,8,12,16,20", minute=30),
+    #     id="ai_summarization",
+    #     replace_existing=True,
+    #     name="AI summarize PDF attachments",
+    # )
+    # scheduler.add_job(
+    #     ai_summarization_job,
+    #     "date",
+    #     run_date=datetime.utcnow() + timedelta(seconds=60),
+    #     id="ai_summarization_startup",
+    #     replace_existing=True,
+    #     name="AI summarize PDFs (startup)",
+    # )
 
     # SAM.gov scraper sync - runs for each NAICS code
     # Uses internal SAM.gov API (no rate limits) with full details
     # Syncs 541511 (Custom Programming) twice daily, others once daily
 
     # Primary NAICS: 541511 - Custom Computer Programming (most important)
+    # Runs at 2 PM and 8 PM UTC (9 AM and 3 PM EST) to catch mid-day postings
     scheduler.add_job(
         scraper_sync_job,
-        CronTrigger(hour="3,15", minute=0),
+        CronTrigger(hour="14,20", minute=0),
         id="scraper_sync_541511",
         replace_existing=True,
-        name="SAM.gov scraper: 541511 (Custom Programming)",
+        name="SAM.gov scraper: 541511 (Custom Programming) - Business Hours",
         kwargs={"naics_code": "541511", "max_results": 500},
     )
 
-    # Secondary NAICS codes - once daily at different hours
+    # Secondary NAICS codes - twice daily at business hours
+    # Morning: 15:00 UTC (10 AM EST), Afternoon: 21:00 UTC (4 PM EST)
     secondary_naics = [
-        ("541512", 4),   # Computer Systems Design - 4 AM
-        ("541519", 6),   # Other Computer Related - 6 AM
-        ("518210", 10),  # Data Processing/Hosting - 10 AM
-        ("541690", 14),  # Scientific/Technical Consulting - 2 PM
+        ("541512", "15,21"),   # Computer Systems Design
+        ("541519", "15,21"),   # Other Computer Related
+        ("518210", "15,21"),   # Data Processing/Hosting
+        ("541690", "15,21"),   # Scientific/Technical Consulting
     ]
 
-    for naics_code, hour in secondary_naics:
+    for naics_code, hours in secondary_naics:
         scheduler.add_job(
             scraper_sync_job,
-            CronTrigger(hour=hour, minute=0),
+            CronTrigger(hour=hours, minute=0),
             id=f"scraper_sync_{naics_code}",
             replace_existing=True,
-            name=f"SAM.gov scraper: {naics_code}",
+            name=f"SAM.gov scraper: {naics_code} - Business Hours",
             kwargs={"naics_code": naics_code, "max_results": 200},
         )
 

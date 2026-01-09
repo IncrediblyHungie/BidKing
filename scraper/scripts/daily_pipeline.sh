@@ -25,6 +25,9 @@ DAYS_TO_SCRAPE=2
 PDF_LIMIT=500
 AI_LIMIT=200
 
+# Sync secret for Fly.io authentication
+export BIDKING_SYNC_SECRET="7b5e6e89762d0ef41e0eaf4fb0810707ed22c0e7d022865595afbe65a19ba7c2"
+
 # Log file
 mkdir -p "$LOGS_DIR"
 LOG_FILE="${LOGS_DIR}/pipeline_${DATE}.log"

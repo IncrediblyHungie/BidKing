@@ -306,3 +306,8 @@ class Deduplicator:
 opportunity_cache = Cache(key_prefix="opportunities", default_ttl=1800)  # 30 min
 api_rate_limiter = RateLimiter(key_prefix="api_rate", default_limit=100, default_window=3600)
 alert_deduplicator = Deduplicator(key_prefix="alert_sent", ttl=604800)  # 7 days
+
+# Additional caches for performance optimization
+filter_options_cache = Cache(key_prefix="filter_options", default_ttl=1800)  # 30 min - dropdown data rarely changes
+analytics_cache = Cache(key_prefix="analytics", default_ttl=900)  # 15 min - aggregated market data
+recompete_cache = Cache(key_prefix="recompetes", default_ttl=600)  # 10 min - recompete listings

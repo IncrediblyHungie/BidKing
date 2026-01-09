@@ -17,9 +17,10 @@ from app.config import settings
 engine = create_engine(
     settings.database_url,
     pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
-    echo=settings.debug,
+    pool_size=30,  # Increased from 10 to handle 50+ concurrent users
+    max_overflow=10,  # Reduced overflow - prefer persistent connections
+    pool_recycle=3600,  # Recycle connections after 1 hour
+    echo=False,  # Disable SQL logging in production (was settings.debug)
 )
 
 # =============================================================================

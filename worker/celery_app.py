@@ -4,16 +4,29 @@ Celery application configuration.
 Defines the Celery app instance and beat schedule for periodic tasks.
 """
 
+import ssl
 from celery import Celery
 from celery.schedules import crontab
 
 from app.config import settings
 
+# Build broker URL with SSL parameters for Upstash Redis
+broker_url = settings.redis_url
+backend_url = settings.redis_url
+
+# If using rediss:// (TLS), add SSL cert requirements
+if broker_url.startswith("rediss://"):
+    # Append SSL parameters if not already present
+    if "ssl_cert_reqs" not in broker_url:
+        separator = "&" if "?" in broker_url else "?"
+        broker_url = f"{broker_url}{separator}ssl_cert_reqs=CERT_NONE"
+        backend_url = f"{backend_url}{separator}ssl_cert_reqs=CERT_NONE"
+
 # Create Celery app
 celery_app = Celery(
     "bidking",
-    broker=settings.redis_url,
-    backend=settings.redis_url,
+    broker=broker_url,
+    backend=backend_url,
     include=[
         "worker.tasks.sam_sync",
         "worker.tasks.alert_matching",
@@ -21,6 +34,7 @@ celery_app = Celery(
         "worker.tasks.usaspending_sync",
         "worker.tasks.calc_sync",
         "worker.tasks.cleanup",
+        "worker.tasks.test_tasks",
     ],
 )
 

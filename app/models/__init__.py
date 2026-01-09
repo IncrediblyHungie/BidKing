@@ -27,6 +27,10 @@ from app.models.company import (
     OpportunityScore,
     OpportunityDecision,
 )
+from app.models.proposal_template import (
+    ProposalTemplate,
+    GeneratedSection,
+)
 
 __all__ = [
     "User",
@@ -54,4 +58,7 @@ __all__ = [
     "OpportunityMetadata",
     "OpportunityScore",
     "OpportunityDecision",
+    # Proposal Templates
+    "ProposalTemplate",
+    "GeneratedSection",
 ]

@@ -337,10 +337,14 @@ def sync_to_flyio(
 
         # Send batch to Fly.io
         try:
+            sync_secret = os.environ.get('BIDKING_SYNC_SECRET', '')
             response = requests.post(
                 f"{api_url}/api/v1/admin/bulk-import",
                 json={'opportunities': payload},
-                headers={'Content-Type': 'application/json'},
+                headers={
+                    'Content-Type': 'application/json',
+                    'X-Sync-Secret': sync_secret,
+                },
                 timeout=120,
             )
 

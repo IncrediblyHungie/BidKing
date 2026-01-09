@@ -1,45 +1,57 @@
-import { useEffect } from "react";
+import { useEffect, lazy, Suspense } from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router";
 import { Toaster } from "react-hot-toast";
 
-// Landing page
+// Landing page - eagerly loaded (first page users see)
 import LandingPage from "./pages/Landing/LandingPage";
 
-// Auth pages
+// Auth pages - eagerly loaded (auth flow should be fast)
 import SignIn from "./pages/AuthPages/SignIn";
 import SignUp from "./pages/AuthPages/SignUp";
-import OnboardingPage from "./pages/Onboarding/OnboardingPage";
-import CompanyOnboardingPage from "./pages/Onboarding/CompanyOnboardingPage";
 
-// Dashboard pages
-import Home from "./pages/Dashboard/Home";
-import UserProfiles from "./pages/UserProfiles";
-
-// BidKing pages
-import OpportunitiesList from "./pages/Opportunities/OpportunitiesList";
-import OpportunityDetail from "./pages/Opportunities/OpportunityDetail";
-import RecompetesList from "./pages/Recompetes/RecompetesList";
-import RecompeteDetail from "./pages/Recompetes/RecompeteDetail";
-import AlertProfilesList from "./pages/Alerts/AlertProfilesList";
-import AlertProfileForm from "./pages/Alerts/AlertProfileForm";
-import PipelinePage from "./pages/Pipeline/PipelinePage";
-import AnalyticsPage from "./pages/Analytics/AnalyticsPage";
-
-// Other pages
-import NotFound from "./pages/OtherPage/NotFound";
-import Calendar from "./pages/Calendar";
-import Blank from "./pages/Blank";
-import BasicTables from "./pages/Tables/BasicTables";
-import FormElements from "./pages/Forms/FormElements";
-import LineChart from "./pages/Charts/LineChart";
-import BarChart from "./pages/Charts/BarChart";
-
-// Layout
+// Layout - eagerly loaded (common wrapper)
 import AppLayout from "./layout/AppLayout";
 import { ScrollToTop } from "./components/common/ScrollToTop";
 
 // Auth store
 import { useAuthStore } from "./stores/authStore";
+
+// Lazy loaded pages - split into separate chunks
+const Home = lazy(() => import("./pages/Dashboard/Home"));
+const UserProfiles = lazy(() => import("./pages/UserProfiles"));
+const OnboardingPage = lazy(() => import("./pages/Onboarding/OnboardingPage"));
+const CompanyOnboardingPage = lazy(() => import("./pages/Onboarding/CompanyOnboardingPage"));
+
+// BidKing pages - lazy loaded
+const OpportunitiesList = lazy(() => import("./pages/Opportunities/OpportunitiesList"));
+const OpportunityDetail = lazy(() => import("./pages/Opportunities/OpportunityDetail"));
+const RecompetesList = lazy(() => import("./pages/Recompetes/RecompetesList"));
+const RecompeteDetail = lazy(() => import("./pages/Recompetes/RecompeteDetail"));
+const AlertProfilesList = lazy(() => import("./pages/Alerts/AlertProfilesList"));
+const AlertProfileForm = lazy(() => import("./pages/Alerts/AlertProfileForm"));
+const PipelinePage = lazy(() => import("./pages/Pipeline/PipelinePage"));
+const AnalyticsPage = lazy(() => import("./pages/Analytics/AnalyticsPage"));
+const TemplatesPage = lazy(() => import("./pages/Templates/TemplatesPage"));
+const PricingPage = lazy(() => import("./pages/Pricing/PricingPage"));
+const NotificationSettings = lazy(() => import("./pages/Settings/NotificationSettings"));
+
+// Other pages - lazy loaded
+const NotFound = lazy(() => import("./pages/OtherPage/NotFound"));
+const Calendar = lazy(() => import("./pages/Calendar"));
+const Blank = lazy(() => import("./pages/Blank"));
+const BasicTables = lazy(() => import("./pages/Tables/BasicTables"));
+const FormElements = lazy(() => import("./pages/Forms/FormElements"));
+const LineChart = lazy(() => import("./pages/Charts/LineChart"));
+const BarChart = lazy(() => import("./pages/Charts/BarChart"));
+
+// Loading fallback component
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center min-h-[400px]">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+    </div>
+  );
+}
 
 export default function App() {
   const initialize = useAuthStore((state) => state.initialize);
@@ -52,58 +64,67 @@ export default function App() {
     <>
       <Router>
         <ScrollToTop />
-        <Routes>
-          {/* Public Landing Page */}
-          <Route path="/" element={<LandingPage />} />
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            {/* Public Landing Page */}
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/pricing" element={<PricingPage />} />
 
-          {/* Dashboard Layout */}
-          <Route element={<AppLayout />}>
-            {/* Main Dashboard */}
-            <Route path="/dashboard" element={<Home />} />
+            {/* Dashboard Layout */}
+            <Route element={<AppLayout />}>
+              {/* Main Dashboard */}
+              <Route path="/dashboard" element={<Home />} />
 
-            {/* Opportunities */}
-            <Route path="/opportunities" element={<OpportunitiesList />} />
-            <Route path="/opportunities/:id" element={<OpportunityDetail />} />
+              {/* Opportunities */}
+              <Route path="/opportunities" element={<OpportunitiesList />} />
+              <Route path="/opportunities/:id" element={<OpportunityDetail />} />
 
-            {/* Recompetes */}
-            <Route path="/recompetes" element={<RecompetesList />} />
-            <Route path="/recompetes/:id" element={<RecompeteDetail />} />
+              {/* Recompetes */}
+              <Route path="/recompetes" element={<RecompetesList />} />
+              <Route path="/recompetes/:id" element={<RecompeteDetail />} />
 
-            {/* Pipeline */}
-            <Route path="/pipeline" element={<PipelinePage />} />
+              {/* Pipeline */}
+              <Route path="/pipeline" element={<PipelinePage />} />
 
-            {/* Analytics */}
-            <Route path="/analytics" element={<AnalyticsPage />} />
+              {/* Analytics */}
+              <Route path="/analytics" element={<AnalyticsPage />} />
 
-            {/* Alert Profiles */}
-            <Route path="/alerts" element={<AlertProfilesList />} />
-            <Route path="/alerts/create" element={<AlertProfileForm />} />
-            <Route path="/alerts/:id/edit" element={<AlertProfileForm />} />
+              {/* Proposal Templates */}
+              <Route path="/templates" element={<TemplatesPage />} />
 
-            {/* User Profile */}
-            <Route path="/profile" element={<UserProfiles />} />
+              {/* Alert Profiles */}
+              <Route path="/alerts" element={<AlertProfilesList />} />
+              <Route path="/alerts/create" element={<AlertProfileForm />} />
+              <Route path="/alerts/:id/edit" element={<AlertProfileForm />} />
 
-            {/* Company Settings (edit mode - inside dashboard layout) */}
-            <Route path="/settings/company" element={<CompanyOnboardingPage />} />
+              {/* User Profile */}
+              <Route path="/profile" element={<UserProfiles />} />
 
-            {/* Settings & Other */}
-            <Route path="/calendar" element={<Calendar />} />
-            <Route path="/blank" element={<Blank />} />
-            <Route path="/form-elements" element={<FormElements />} />
-            <Route path="/basic-tables" element={<BasicTables />} />
-            <Route path="/line-chart" element={<LineChart />} />
-            <Route path="/bar-chart" element={<BarChart />} />
-          </Route>
+              {/* Company Settings (edit mode - inside dashboard layout) */}
+              <Route path="/settings/company" element={<CompanyOnboardingPage />} />
 
-          {/* Auth Layout */}
-          <Route path="/signin" element={<SignIn />} />
-          <Route path="/signup" element={<SignUp />} />
-          <Route path="/onboarding" element={<OnboardingPage />} />
-          <Route path="/company-setup" element={<CompanyOnboardingPage />} />
+              {/* Notification Settings */}
+              <Route path="/settings/notifications" element={<NotificationSettings />} />
 
-          {/* Fallback Route */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+              {/* Settings & Other */}
+              <Route path="/calendar" element={<Calendar />} />
+              <Route path="/blank" element={<Blank />} />
+              <Route path="/form-elements" element={<FormElements />} />
+              <Route path="/basic-tables" element={<BasicTables />} />
+              <Route path="/line-chart" element={<LineChart />} />
+              <Route path="/bar-chart" element={<BarChart />} />
+            </Route>
+
+            {/* Auth Layout */}
+            <Route path="/signin" element={<SignIn />} />
+            <Route path="/signup" element={<SignUp />} />
+            <Route path="/onboarding" element={<OnboardingPage />} />
+            <Route path="/company-setup" element={<CompanyOnboardingPage />} />
+
+            {/* Fallback Route */}
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Suspense>
       </Router>
 
       {/* Toast notifications */}

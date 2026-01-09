@@ -118,7 +118,12 @@ def summarize_pdf_content(
                 }
             ]
         )
-        logger.info(f"Claude API response received, stop_reason: {message.stop_reason}")
+
+        # Track token usage
+        input_tokens = message.usage.input_tokens if message.usage else 0
+        output_tokens = message.usage.output_tokens if message.usage else 0
+        total_tokens = input_tokens + output_tokens
+        logger.info(f"Claude API response received, stop_reason: {message.stop_reason}, tokens: {input_tokens}+{output_tokens}={total_tokens}")
 
         # Extract the text response
         response_text = ""
@@ -158,6 +163,7 @@ def summarize_pdf_content(
             summary_data["status"] = "summarized"
             summary_data["model"] = "claude-sonnet-4-20250514"
             summary_data["analyzed_at"] = datetime.utcnow().isoformat()
+            summary_data["tokens_used"] = total_tokens
             return summary_data
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse Claude response as JSON: {e}")
@@ -192,7 +198,8 @@ def summarize_pdf_content(
 
 def batch_summarize_attachments(
     limit: int = 10,
-    force: bool = False
+    force: bool = False,
+    user_id: str = None
 ) -> Dict[str, Any]:
     """
     Summarize multiple attachments that have extracted text but no AI summary.
@@ -200,19 +207,21 @@ def batch_summarize_attachments(
     Args:
         limit: Maximum number of attachments to process
         force: If True, re-summarize even if already done
+        user_id: If provided, track usage for this user
 
     Returns:
         Summary of processing results
     """
     from decimal import Decimal
     from app.database import SessionLocal
-    from app.models import OpportunityAttachment, Opportunity
+    from app.models import OpportunityAttachment, Opportunity, UsageTracking
 
     results = {
         "processed": 0,
         "summarized": 0,
         "failed": 0,
         "skipped": 0,
+        "total_tokens": 0,
         "errors": []
     }
 
@@ -255,7 +264,11 @@ def batch_summarize_attachments(
                     att.ai_summarized_at = datetime.utcnow()
                     att.ai_summary_error = None
                     results["summarized"] += 1
-                    logger.info(f"Summarized: {att.name}")
+
+                    # Track token usage
+                    tokens_used = summary.get("tokens_used", 0)
+                    results["total_tokens"] += tokens_used
+                    logger.info(f"Summarized: {att.name} ({tokens_used} tokens)")
 
                     # Update parent opportunity with AI estimated value
                     estimated_value = summary.get("estimated_value")
@@ -312,6 +325,39 @@ def batch_summarize_attachments(
                     "name": att.name,
                     "error": str(e)
                 })
+
+        # Update usage tracking if user_id provided and tokens were used
+        if user_id and results["total_tokens"] > 0:
+            try:
+                from calendar import monthrange
+                now = datetime.utcnow()
+                month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                _, last_day = monthrange(now.year, now.month)
+                month_end = month_start.replace(day=last_day, hour=23, minute=59, second=59)
+
+                usage = db.query(UsageTracking).filter(
+                    UsageTracking.user_id == user_id,
+                    UsageTracking.period_start == month_start,
+                ).first()
+
+                if not usage:
+                    import uuid
+                    usage = UsageTracking(
+                        id=uuid.uuid4(),
+                        user_id=user_id,
+                        period_start=month_start,
+                        period_end=month_end,
+                        ai_generations=0,
+                        ai_tokens_used=0,
+                    )
+                    db.add(usage)
+
+                usage.ai_generations = (usage.ai_generations or 0) + results["summarized"]
+                usage.ai_tokens_used = (usage.ai_tokens_used or 0) + results["total_tokens"]
+                db.commit()
+                logger.info(f"Updated usage tracking: +{results['summarized']} generations, +{results['total_tokens']} tokens")
+            except Exception as e:
+                logger.error(f"Error updating usage tracking: {e}")
 
     return results
 

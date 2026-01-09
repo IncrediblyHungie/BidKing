@@ -13,8 +13,8 @@ from celery import shared_task
 import resend
 
 from app.database import SessionLocal
-from app.models import User, AlertProfile, Opportunity, AlertSent, SavedOpportunity
-from app.config import settings
+from app.models import User, AlertProfile, Opportunity, AlertSent, SavedOpportunity, UsageTracking
+from app.config import settings, SUBSCRIPTION_TIERS
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +52,26 @@ def send_alert_email(
             logger.error(f"Missing data for alert: user={user}, profile={profile}, opps={len(opportunities)}")
             return {"error": "Missing data"}
 
+        # Check if user has reached their monthly alert limit
+        tier_config = SUBSCRIPTION_TIERS.get(user.subscription_tier, SUBSCRIPTION_TIERS["free"])
+        alerts_limit = tier_config["limits"]["alerts_per_month"]
+
+        # Get current month's usage
+        from calendar import monthrange
+        now = datetime.utcnow()
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        usage = db.query(UsageTracking).filter(
+            UsageTracking.user_id == user.id,
+            UsageTracking.period_start == month_start,
+        ).first()
+
+        current_alerts = usage.alerts_sent if usage else 0
+
+        if current_alerts >= alerts_limit:
+            logger.warning(f"User {user_id} has reached alert limit ({current_alerts}/{alerts_limit})")
+            return {"error": "Alert limit reached", "current": current_alerts, "limit": alerts_limit}
+
         # Build email content
         subject = _build_subject(profile.name, alert_type, len(opportunities))
         html_content = _build_html_content(user, profile, opportunities, alert_type)
@@ -78,6 +98,22 @@ def send_alert_email(
                     email_message_id=response.get("id"),
                 )
                 db.add(alert_sent)
+
+            # Update usage tracking
+            if not usage:
+                import uuid as uuid_module
+                _, last_day = monthrange(now.year, now.month)
+                month_end = month_start.replace(day=last_day, hour=23, minute=59, second=59)
+                usage = UsageTracking(
+                    id=uuid_module.uuid4(),
+                    user_id=user.id,
+                    period_start=month_start,
+                    period_end=month_end,
+                    alerts_sent=0,
+                )
+                db.add(usage)
+
+            usage.alerts_sent = (usage.alerts_sent or 0) + len(opportunities)
 
             db.commit()
 
@@ -329,7 +365,7 @@ def send_reminder_email(self, user_id: str, saved_opportunity_id: str, reminder_
                         <a href="{settings.frontend_url}/pipeline" class="button">
                             View in Pipeline
                         </a>
-                        <a href="{opportunity.ui_link or opportunity.sam_gov_link}" class="button button-secondary">
+                        <a href="{opportunity.ui_link}" class="button button-secondary">
                             View on SAM.gov
                         </a>
                     </p>

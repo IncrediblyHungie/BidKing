@@ -145,4 +145,67 @@ export interface OpportunityScore {
   calculated_at?: string;
 }
 
+// Win Probability types
+export interface WinProbabilityFactor {
+  name: string;
+  impact: number;
+  detail: string;
+}
+
+export interface WinProbability {
+  probability: number;
+  confidence: 'low' | 'medium' | 'high';
+  factors: WinProbabilityFactor[];
+  recommendation: string;
+  algorithm_version?: string;
+  calculated_at?: string;
+}
+
+// Incumbent Vulnerability types
+export interface VulnerabilityFactor {
+  score: number;
+  weight: number;
+  detail: string;
+}
+
+export interface IncumbentVulnerability {
+  incumbent_name: string | null;
+  incumbent_uei: string;
+  vulnerability_score: number;
+  level: 'Low' | 'Medium' | 'High';
+  factors: {
+    concentration: VulnerabilityFactor;
+    expertise: VulnerabilityFactor;
+    trajectory: VulnerabilityFactor;
+    market_share: VulnerabilityFactor;
+    recompete_history: VulnerabilityFactor;
+  };
+  recommendation: string;
+  summary?: {
+    total_contracts: number;
+    total_value: number;
+  };
+  algorithm_version?: string;
+  calculated_at?: string;
+}
+
+// Win Probability API
+export const getWinProbability = async (opportunityId: string): Promise<WinProbability> => {
+  const response = await apiClient.get(`/opportunities/${opportunityId}/win-probability`);
+  return response.data;
+};
+
+// Incumbent Vulnerability API (public, no auth required)
+export const getIncumbentVulnerability = async (
+  uei: string,
+  naicsCode?: string,
+  agencyName?: string
+): Promise<IncumbentVulnerability> => {
+  const params: Record<string, string> = {};
+  if (naicsCode) params.naics_code = naicsCode;
+  if (agencyName) params.agency_name = agencyName;
+  const response = await apiClient.get(`/analytics/competitors/incumbent/${uei}/vulnerability`, { params });
+  return response.data;
+};
+
 export default opportunitiesApi;

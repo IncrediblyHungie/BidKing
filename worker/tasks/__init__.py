@@ -6,6 +6,7 @@ from worker.tasks.email_sending import send_alert_email, send_welcome_email
 from worker.tasks.usaspending_sync import sync_recent_awards, update_naics_statistics
 from worker.tasks.calc_sync import fetch_labor_rates
 from worker.tasks.cleanup import cleanup_archived_opportunities, cleanup_expired_cache
+from worker.tasks.test_tasks import ping, slow_task, retry_test, add
 
 __all__ = [
     "sync_all_opportunities",
@@ -19,4 +20,9 @@ __all__ = [
     "fetch_labor_rates",
     "cleanup_archived_opportunities",
     "cleanup_expired_cache",
+    # Test tasks
+    "ping",
+    "slow_task",
+    "retry_test",
+    "add",
 ]

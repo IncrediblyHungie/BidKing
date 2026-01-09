@@ -89,6 +89,7 @@ def _sync_awards_for_naics(naics_code: str, start_date: str, end_date: str) -> i
             "Place of Performance Zip",
             "recipient_id",
             "generated_internal_id",
+            "Type of Set Aside",
         ],
         "page": 1,
         "limit": 100,
@@ -130,6 +131,7 @@ def _sync_awards_for_naics(naics_code: str, start_date: str, end_date: str) -> i
                             "pop_city": award.get("Place of Performance City"),
                             "pop_state": award.get("Place of Performance State"),
                             "pop_zip": award.get("Place of Performance Zip"),
+                            "set_aside_type": award.get("Type of Set Aside"),
                             "fetched_at": datetime.utcnow(),
                         }
 
@@ -139,6 +141,7 @@ def _sync_awards_for_naics(naics_code: str, start_date: str, end_date: str) -> i
                             set_={
                                 "total_obligation": stmt.excluded.total_obligation,
                                 "period_of_performance_end": stmt.excluded.period_of_performance_end,
+                                "set_aside_type": stmt.excluded.set_aside_type,
                                 "fetched_at": stmt.excluded.fetched_at,
                             },
                         )

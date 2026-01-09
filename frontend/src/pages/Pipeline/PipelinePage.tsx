@@ -159,20 +159,41 @@ function EditModal({
   const [priority, setPriority] = useState(saved.priority);
   const [reminderDate, setReminderDate] = useState(saved.reminder_date || "");
   const [status, setStatus] = useState(saved.status);
+  // Win tracking
+  const [winAmount, setWinAmount] = useState(saved.win_amount?.toString() || "");
+  const [winDate, setWinDate] = useState(saved.win_date || "");
+  // Loss tracking
+  const [winnerName, setWinnerName] = useState(saved.winner_name || "");
+  const [lossReason, setLossReason] = useState(saved.loss_reason || "");
+  // Feedback
+  const [feedbackNotes, setFeedbackNotes] = useState(saved.feedback_notes || "");
 
   const handleSave = () => {
-    onSave(saved.id, {
+    const data: SavedOpportunityUpdate = {
       notes,
       priority,
       reminder_date: reminderDate || undefined,
       status,
-    });
+    };
+    // Add win tracking fields if won
+    if (status === "won") {
+      data.win_amount = winAmount ? parseFloat(winAmount) : undefined;
+      data.win_date = winDate || undefined;
+      data.feedback_notes = feedbackNotes || undefined;
+    }
+    // Add loss tracking fields if lost
+    if (status === "lost") {
+      data.winner_name = winnerName || undefined;
+      data.loss_reason = lossReason || undefined;
+      data.feedback_notes = feedbackNotes || undefined;
+    }
+    onSave(saved.id, data);
     onClose();
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-lg p-6 bg-white rounded-lg dark:bg-gray-800">
+      <div className="w-full max-w-lg p-6 bg-white rounded-lg dark:bg-gray-800 max-h-[90vh] overflow-y-auto">
         <h3 className="text-lg font-semibold mb-4 dark:text-white">Edit Pipeline Item</h3>
         <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">{saved.opportunity.title}</p>
 
@@ -192,6 +213,77 @@ function EditModal({
             <option value="archived">Archived</option>
           </select>
         </div>
+
+        {/* Win Fields - Only show when status is "won" */}
+        {status === "won" && (
+          <div className="mb-4 p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
+            <h4 className="text-sm font-semibold text-green-700 dark:text-green-400 mb-3">Win Details</h4>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1 dark:text-gray-200">Win Amount ($)</label>
+                <input
+                  type="number"
+                  value={winAmount}
+                  onChange={(e) => setWinAmount(e.target.value)}
+                  placeholder="Contract value"
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1 dark:text-gray-200">Win Date</label>
+                <input
+                  type="date"
+                  value={winDate}
+                  onChange={(e) => setWinDate(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Loss Fields - Only show when status is "lost" */}
+        {status === "lost" && (
+          <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
+            <h4 className="text-sm font-semibold text-red-700 dark:text-red-400 mb-3">Loss Details</h4>
+            <div className="mb-3">
+              <label className="block text-sm font-medium mb-1 dark:text-gray-200">Winner Name</label>
+              <input
+                type="text"
+                value={winnerName}
+                onChange={(e) => setWinnerName(e.target.value)}
+                placeholder="Who won this contract?"
+                className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1 dark:text-gray-200">Loss Reason</label>
+              <textarea
+                value={lossReason}
+                onChange={(e) => setLossReason(e.target.value)}
+                rows={2}
+                placeholder="Why did we lose? (price, experience, etc.)"
+                className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Feedback Notes - Show for both won and lost */}
+        {(status === "won" || status === "lost") && (
+          <div className="mb-4">
+            <label className="block text-sm font-medium mb-1 dark:text-gray-200">
+              Lessons Learned
+            </label>
+            <textarea
+              value={feedbackNotes}
+              onChange={(e) => setFeedbackNotes(e.target.value)}
+              rows={3}
+              placeholder="What did you learn from this opportunity? What would you do differently?"
+              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600"
+            />
+          </div>
+        )}
 
         {/* Priority */}
         <div className="mb-4">

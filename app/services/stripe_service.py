@@ -17,8 +17,9 @@ from app.models import User, Subscription
 
 logger = logging.getLogger(__name__)
 
-# Initialize Stripe
+# Initialize Stripe with latest API version
 stripe.api_key = settings.stripe_secret_key
+stripe.api_version = "2025-12-15.clover"  # Latest API version (Dec 2025)
 
 # Price IDs for each tier (set these in Stripe Dashboard)
 STRIPE_PRICE_IDS = {

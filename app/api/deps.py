@@ -7,6 +7,7 @@ Supports both Supabase JWT tokens and internal JWT tokens.
 
 from typing import Generator, Optional
 from uuid import UUID
+from datetime import date, datetime, timedelta
 import logging
 
 from fastapi import Depends, HTTPException, status, Request
@@ -189,6 +190,69 @@ async def get_current_verified_user(
     return current_user
 
 
+async def get_admin_user(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """
+    Get current user and verify they have admin privileges.
+
+    Args:
+        current_user: Current authenticated user
+
+    Returns:
+        Admin User
+
+    Raises:
+        HTTPException: If user is not an admin
+    """
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+    return current_user
+
+
+async def get_optional_admin_user(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Optional[User]:
+    """
+    Get admin user if authenticated, None otherwise.
+
+    Used by endpoints that accept either admin JWT or sync secret auth.
+    """
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None
+
+    token = auth_header.split(" ")[1]
+    user_id = None
+    email = None
+
+    # Try Supabase token first
+    payload = decode_supabase_token(token)
+    if payload:
+        user_id = payload.get("sub")
+        email = payload.get("email")
+    else:
+        # Fall back to internal token
+        payload = decode_token(token)
+        if payload and payload.get("type") == "access":
+            user_id = payload.get("sub")
+
+    if not user_id:
+        return None
+
+    # Find user
+    user = db.query(User).filter(User.id == UUID(user_id)).first()
+
+    # Return user only if they're an admin
+    if user and user.is_admin:
+        return user
+    return None
+
+
 async def get_optional_user(
     request: Request,
     db: Session = Depends(get_db),
@@ -271,7 +335,13 @@ class RateLimitDependency:
             identifier = str(user.id)
         else:
             # Anonymous user - use IP-based rate limiting with lower limits
-            client_ip = request.client.host if request.client else "unknown"
+            # Use X-Forwarded-For header for requests behind proxy (Fly.io, nginx, etc.)
+            forwarded = request.headers.get("X-Forwarded-For")
+            if forwarded:
+                # X-Forwarded-For can be comma-separated; first IP is the client
+                client_ip = forwarded.split(",")[0].strip()
+            else:
+                client_ip = request.client.host if request.client else "unknown"
             limit = 100  # 100 requests per hour for anonymous users
             identifier = f"anon:{client_ip}"
 
@@ -382,3 +452,131 @@ async def get_user_from_token(request: Request, db: Session) -> Optional[User]:
         logger.info(f"Created new user from Supabase: {email}")
 
     return user
+
+
+class AIRateLimitDependency:
+    """
+    Rate limiting dependency specifically for AI generation endpoints.
+
+    Enforces:
+    - Daily generation limits (stored in Redis, resets at midnight UTC)
+    - Monthly token quotas (stored in database via UsageTracking)
+
+    Limits by tier:
+    - Free: 3 generations/day, 50K tokens/month
+    - Starter: 20 generations/day, 500K tokens/month
+    - Pro: 100 generations/day, 2M tokens/month
+    """
+
+    async def __call__(
+        self,
+        request: Request,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+    ) -> User:
+        from app.models.subscription import UsageTracking
+
+        tier_config = SUBSCRIPTION_TIERS.get(
+            current_user.subscription_tier,
+            SUBSCRIPTION_TIERS["free"]
+        )
+        daily_limit = tier_config["limits"]["ai_generations_per_day"]
+        monthly_token_limit = tier_config["limits"]["ai_tokens_per_month"]
+
+        # Check daily generation count via Redis
+        today = date.today().isoformat()
+        daily_key = f"ai_gen:{current_user.id}:{today}"
+
+        try:
+            current_count = api_rate_limiter.redis.get(daily_key)
+            current_count = int(current_count) if current_count else 0
+        except Exception as e:
+            logger.warning(f"Redis error checking AI rate limit: {e}")
+            current_count = 0
+
+        if current_count >= daily_limit:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={
+                    "message": f"Daily AI generation limit ({daily_limit}) exceeded",
+                    "limit": daily_limit,
+                    "current": current_count,
+                    "resets": "midnight UTC",
+                    "upgrade_url": "/pricing" if current_user.subscription_tier == "free" else None,
+                },
+            )
+
+        # Check monthly token usage from database
+        month_start = datetime(date.today().year, date.today().month, 1)
+        usage = db.query(UsageTracking).filter(
+            UsageTracking.user_id == current_user.id,
+            UsageTracking.month == month_start,
+        ).first()
+
+        tokens_used = usage.ai_tokens_used if usage and hasattr(usage, 'ai_tokens_used') else 0
+
+        if tokens_used >= monthly_token_limit:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={
+                    "message": f"Monthly AI token quota ({monthly_token_limit:,}) exceeded",
+                    "limit": monthly_token_limit,
+                    "used": tokens_used,
+                    "resets": "first of next month",
+                    "upgrade_url": "/pricing" if current_user.subscription_tier != "pro" else None,
+                },
+            )
+
+        # Increment daily counter in Redis (set to expire at midnight UTC)
+        try:
+            pipe = api_rate_limiter.redis.pipeline()
+            pipe.incr(daily_key)
+            # Calculate seconds until midnight UTC
+            now = datetime.utcnow()
+            midnight = datetime(now.year, now.month, now.day) + timedelta(days=1)
+            seconds_until_midnight = int((midnight - now).total_seconds())
+            pipe.expire(daily_key, seconds_until_midnight)
+            pipe.execute()
+        except Exception as e:
+            logger.warning(f"Redis error incrementing AI counter: {e}")
+
+        # Store request state for token tracking after generation
+        request.state.ai_rate_limit_user = current_user
+        request.state.ai_rate_limit_db = db
+
+        return current_user
+
+
+# AI rate limiting dependency
+rate_limit_ai = AIRateLimitDependency()
+
+
+def track_ai_token_usage(db: Session, user_id: UUID, tokens_used: int):
+    """
+    Track AI token usage in the database.
+    Call this after successful AI generation to update monthly totals.
+    """
+    from app.models.subscription import UsageTracking
+
+    month_start = datetime(date.today().year, date.today().month, 1)
+
+    usage = db.query(UsageTracking).filter(
+        UsageTracking.user_id == user_id,
+        UsageTracking.month == month_start,
+    ).first()
+
+    if not usage:
+        usage = UsageTracking(
+            user_id=user_id,
+            month=month_start,
+            ai_generations=1,
+            ai_tokens_used=tokens_used,
+        )
+        db.add(usage)
+    else:
+        if hasattr(usage, 'ai_generations'):
+            usage.ai_generations = (usage.ai_generations or 0) + 1
+        if hasattr(usage, 'ai_tokens_used'):
+            usage.ai_tokens_used = (usage.ai_tokens_used or 0) + tokens_used
+
+    db.commit()

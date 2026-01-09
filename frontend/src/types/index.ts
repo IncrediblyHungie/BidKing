@@ -276,6 +276,14 @@ export interface SavedOpportunity {
   priority: number;
   reminder_date: string | null;
   stage_changed_at: string | null;
+  // Win tracking
+  win_amount: number | null;
+  win_date: string | null;
+  // Loss tracking
+  winner_name: string | null;
+  loss_reason: string | null;
+  // Feedback
+  feedback_notes: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -285,6 +293,14 @@ export interface SavedOpportunityUpdate {
   notes?: string;
   priority?: number;
   reminder_date?: string;
+  // Win tracking
+  win_amount?: number;
+  win_date?: string;
+  // Loss tracking
+  winner_name?: string;
+  loss_reason?: string;
+  // Feedback
+  feedback_notes?: string;
 }
 
 export interface PipelineStats {

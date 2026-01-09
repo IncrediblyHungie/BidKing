@@ -602,9 +602,16 @@ export default function CompanyOnboardingPage() {
       </Button>
 
       <div className="flex justify-between pt-4">
-        <Button variant="outline" onClick={() => setCurrentStep(1)} disabled={isLoading}>
-          Back
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setCurrentStep(1)} disabled={isLoading}>
+            Back
+          </Button>
+          {!isEditMode && (
+            <Button variant="outline" onClick={handleSkip} disabled={isLoading} className="text-gray-500">
+              Skip for now
+            </Button>
+          )}
+        </div>
         <Button
           onClick={() => {
             if (naicsCodes.length === 0) {
@@ -678,9 +685,16 @@ export default function CompanyOnboardingPage() {
       </p>
 
       <div className="flex justify-between pt-4">
-        <Button variant="outline" onClick={() => setCurrentStep(2)} disabled={isLoading}>
-          Back
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setCurrentStep(2)} disabled={isLoading}>
+            Back
+          </Button>
+          {!isEditMode && (
+            <Button variant="outline" onClick={handleSkip} disabled={isLoading} className="text-gray-500">
+              Skip for now
+            </Button>
+          )}
+        </div>
         <Button onClick={() => setCurrentStep(4)} disabled={isLoading}>
           Next: Preferences
         </Button>
@@ -935,9 +949,16 @@ export default function CompanyOnboardingPage() {
       </div>
 
       <div className="flex justify-between pt-4">
-        <Button variant="outline" onClick={() => setCurrentStep(3)} disabled={isLoading || isUploading}>
-          Back
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setCurrentStep(3)} disabled={isLoading || isUploading}>
+            Back
+          </Button>
+          {!isEditMode && (
+            <Button variant="outline" onClick={handleSkip} disabled={isLoading || isUploading} className="text-gray-500">
+              Skip for now
+            </Button>
+          )}
+        </div>
         <Button onClick={handleSavePreferences} disabled={isLoading || isUploading}>
           {isLoading ? "Saving..." : isEditMode ? "Save Settings" : "Complete Setup"}
         </Button>

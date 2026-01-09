@@ -209,6 +209,9 @@ class RecompeteOpportunity(Base):
     incumbent_name = Column(String(255), nullable=True)
     incumbent_uei = Column(String(12), nullable=True)
 
+    # Competition info
+    set_aside_type = Column(String(50), nullable=True)
+
     # Tracking status
     status = Column(String(20), default="upcoming")
     # Status: upcoming, rfp_expected, rfp_posted, awarded

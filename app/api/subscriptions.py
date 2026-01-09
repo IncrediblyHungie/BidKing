@@ -27,6 +27,46 @@ from app.config import SUBSCRIPTION_TIERS, settings
 router = APIRouter()
 
 
+def get_or_create_usage_record(db: Session, user_id, month_start, month_end=None) -> UsageTracking:
+    """
+    Get or create a UsageTracking record for the given user and month.
+
+    Used by various parts of the system to track usage.
+    """
+    from calendar import monthrange
+    from datetime import datetime
+
+    if month_end is None:
+        _, last_day = monthrange(month_start.year, month_start.month)
+        month_end = month_start.replace(day=last_day, hour=23, minute=59, second=59)
+
+    usage = db.query(UsageTracking).filter(
+        UsageTracking.user_id == user_id,
+        UsageTracking.period_start == month_start,
+    ).first()
+
+    if not usage:
+        import uuid
+        usage = UsageTracking(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            period_start=month_start,
+            period_end=month_end,
+            alerts_sent=0,
+            searches_performed=0,
+            exports_performed=0,
+            api_calls=0,
+            opportunities_viewed=0,
+            ai_generations=0,
+            ai_tokens_used=0,
+        )
+        db.add(usage)
+        db.commit()
+        db.refresh(usage)
+
+    return usage
+
+
 @router.get("/tiers", response_model=List[SubscriptionTierInfo])
 async def list_subscription_tiers():
     """
@@ -37,12 +77,16 @@ async def list_subscription_tiers():
     """
     tiers = []
     for tier_name, config in SUBSCRIPTION_TIERS.items():
+        # Convert features dict to list of enabled feature names
+        features_dict = config.get("features", {})
+        features_list = [k for k, v in features_dict.items() if v] if isinstance(features_dict, dict) else features_dict
+
         tiers.append(SubscriptionTierInfo(
             tier=tier_name,
             price_monthly=config["price_monthly"],
             price_yearly=config.get("price_yearly", config["price_monthly"] * 10),
             limits=config["limits"],
-            features=config.get("features", []),
+            features=features_list,
         ))
     return tiers
 
@@ -84,16 +128,27 @@ async def get_usage(
     db: Session = Depends(get_db),
 ):
     """
-    Get current user's usage statistics.
+    Get current user's usage statistics for the current billing period.
+
+    Returns usage counters and tier limits for:
+    - Alerts sent this month
+    - API calls
+    - Exports performed
+    - AI generations
     """
     from datetime import datetime
+    from calendar import monthrange
 
-    # Get current month's usage
-    month_start = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    # Get current month boundaries
+    now = datetime.utcnow()
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    _, last_day = monthrange(now.year, now.month)
+    month_end = month_start.replace(day=last_day, hour=23, minute=59, second=59)
 
+    # Get or create current month's usage record
     usage = db.query(UsageTracking).filter(
         UsageTracking.user_id == current_user.id,
-        UsageTracking.period_start >= month_start,
+        UsageTracking.period_start == month_start,
     ).first()
 
     # Get tier limits
@@ -102,39 +157,38 @@ async def get_usage(
         SUBSCRIPTION_TIERS["free"]
     )
     limits = tier_config["limits"]
+    alerts_limit = limits["alerts_per_month"]
+    api_limit = limits["api_calls_per_hour"] * 24 * 30  # Rough monthly estimate
 
     if not usage:
         return UsageResponse(
             user_id=current_user.id,
             period_start=month_start,
-            period_end=month_start.replace(month=month_start.month + 1 if month_start.month < 12 else 1),
+            period_end=month_end,
             alerts_sent=0,
             api_calls=0,
             opportunities_viewed=0,
             exports_count=0,
-            alerts_limit=limits["alerts_per_month"],
-            api_calls_limit=limits["api_calls_per_hour"] * 24 * 30,  # Rough monthly estimate
+            alerts_limit=alerts_limit,
+            api_calls_limit=api_limit,
             exports_limit=limits.get("exports_per_month", 0),
             alerts_usage_percent=0,
             api_usage_percent=0,
         )
 
-    alerts_limit = limits["alerts_per_month"]
-    api_limit = limits["api_calls_per_hour"] * 24 * 30
-
     return UsageResponse(
         user_id=current_user.id,
         period_start=usage.period_start,
-        period_end=usage.period_end,
-        alerts_sent=usage.alerts_sent,
-        api_calls=usage.api_calls,
-        opportunities_viewed=usage.opportunities_viewed,
-        exports_count=usage.exports_count,
+        period_end=usage.period_end or month_end,
+        alerts_sent=usage.alerts_sent or 0,
+        api_calls=usage.api_calls or 0,
+        opportunities_viewed=usage.opportunities_viewed or 0,
+        exports_count=usage.exports_performed or 0,
         alerts_limit=alerts_limit,
         api_calls_limit=api_limit,
         exports_limit=limits.get("exports_per_month", 0),
-        alerts_usage_percent=(usage.alerts_sent / alerts_limit * 100) if alerts_limit else 0,
-        api_usage_percent=(usage.api_calls / api_limit * 100) if api_limit else 0,
+        alerts_usage_percent=(usage.alerts_sent / alerts_limit * 100) if alerts_limit and usage.alerts_sent else 0,
+        api_usage_percent=(usage.api_calls / api_limit * 100) if api_limit and usage.api_calls else 0,
     )
 
 

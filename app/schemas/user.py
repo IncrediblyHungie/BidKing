@@ -40,6 +40,18 @@ class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
     company_name: Optional[str] = Field(None, max_length=255)
     notification_preferences: Optional[dict] = None
+    # Notification settings
+    email_reminders_enabled: Optional[bool] = None
+    email_deadline_warnings: Optional[bool] = None
+    deadline_warning_days: Optional[int] = Field(None, ge=1, le=30)
+
+
+class UserNotificationSettings(BaseModel):
+    """Schema for user notification settings."""
+
+    email_reminders_enabled: bool = True
+    email_deadline_warnings: bool = True
+    deadline_warning_days: int = Field(5, ge=1, le=30)
 
 
 class UserResponse(BaseModel):
@@ -51,6 +63,10 @@ class UserResponse(BaseModel):
     subscription_tier: str
     is_verified: bool
     created_at: datetime
+    # Notification settings
+    email_reminders_enabled: bool = True
+    email_deadline_warnings: bool = True
+    deadline_warning_days: int = 5
 
     class Config:
         from_attributes = True

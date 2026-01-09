@@ -6,13 +6,17 @@ Main FastAPI application entry point.
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
+from typing import Optional, List
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from app.api import api_router
+from app.api.deps import get_admin_user, get_optional_admin_user
 from app.config import settings
+from app.models import User
 
 
 @asynccontextmanager
@@ -35,11 +39,100 @@ async def lifespan(app: FastAPI):
         # Company & Scoring models
         CompanyProfile, CompanyNAICS, CompanyCertification,
         PastPerformance, CapabilityStatement, OpportunityMetadata,
-        OpportunityScore, OpportunityDecision
+        OpportunityScore, OpportunityDecision,
+        # Proposal Templates
+        ProposalTemplate, GeneratedSection
     )
     print("Creating database tables...")
     Base.metadata.create_all(bind=engine)
     print("Database tables created successfully!")
+
+    # Run auto-migrations for any missing columns (SQLite doesn't add columns on create_all)
+    print("Running auto-migrations for missing columns...")
+    from sqlalchemy import text
+
+    # Opportunity table migrations
+    amendment_columns = [
+        ("previous_response_deadline", "TIMESTAMP"),
+        ("amendment_count", "INTEGER DEFAULT 0"),
+        ("last_amendment_date", "TIMESTAMP"),
+        ("amendment_history", "TEXT"),
+    ]
+    with engine.connect() as conn:
+        result = conn.execute(text("PRAGMA table_info(opportunities)"))
+        existing_columns = [row[1] for row in result.fetchall()]
+        for col_name, col_type in amendment_columns:
+            if col_name not in existing_columns:
+                try:
+                    conn.execute(text(f"ALTER TABLE opportunities ADD COLUMN {col_name} {col_type}"))
+                    print(f"  Added column: opportunities.{col_name}")
+                except Exception as e:
+                    print(f"  Column {col_name} error: {e}")
+        conn.commit()
+
+    # Usage tracking table migrations (renamed month -> period_start, added new fields)
+    usage_columns = [
+        ("period_start", "TIMESTAMP"),
+        ("period_end", "TIMESTAMP"),
+        ("opportunities_viewed", "INTEGER DEFAULT 0"),
+    ]
+    with engine.connect() as conn:
+        result = conn.execute(text("PRAGMA table_info(usage_tracking)"))
+        existing_columns = [row[1] for row in result.fetchall()]
+        for col_name, col_type in usage_columns:
+            if col_name not in existing_columns:
+                try:
+                    conn.execute(text(f"ALTER TABLE usage_tracking ADD COLUMN {col_name} {col_type}"))
+                    print(f"  Added column: usage_tracking.{col_name}")
+                except Exception as e:
+                    print(f"  Column {col_name} error: {e}")
+
+        # If old 'month' column exists and period_start was just added, migrate data
+        if "month" in existing_columns and "period_start" in [c[0] for c in usage_columns]:
+            try:
+                conn.execute(text("UPDATE usage_tracking SET period_start = month WHERE period_start IS NULL"))
+                print("  Migrated month -> period_start data")
+            except Exception as e:
+                print(f"  Data migration error: {e}")
+        conn.commit()
+
+    # RecompeteOpportunity table migrations (add set_aside_type)
+    recompete_columns = [
+        ("set_aside_type", "TEXT"),
+    ]
+    with engine.connect() as conn:
+        result = conn.execute(text("PRAGMA table_info(recompete_opportunities)"))
+        existing_columns = [row[1] for row in result.fetchall()]
+        for col_name, col_type in recompete_columns:
+            if col_name not in existing_columns:
+                try:
+                    conn.execute(text(f"ALTER TABLE recompete_opportunities ADD COLUMN {col_name} {col_type}"))
+                    print(f"  Added column: recompete_opportunities.{col_name}")
+                except Exception as e:
+                    print(f"  Column {col_name} error: {e}")
+        conn.commit()
+
+    # SavedOpportunity table migrations (win/loss tracking)
+    saved_opp_columns = [
+        ("win_amount", "DECIMAL(15,2)"),
+        ("win_date", "DATE"),
+        ("winner_name", "VARCHAR(255)"),
+        ("loss_reason", "TEXT"),
+        ("feedback_notes", "TEXT"),
+    ]
+    with engine.connect() as conn:
+        result = conn.execute(text("PRAGMA table_info(saved_opportunities)"))
+        existing_columns = [row[1] for row in result.fetchall()]
+        for col_name, col_type in saved_opp_columns:
+            if col_name not in existing_columns:
+                try:
+                    conn.execute(text(f"ALTER TABLE saved_opportunities ADD COLUMN {col_name} {col_type}"))
+                    print(f"  Added column: saved_opportunities.{col_name}")
+                except Exception as e:
+                    print(f"  Column {col_name} error: {e}")
+        conn.commit()
+
+    print("Auto-migrations complete!")
 
     # Start background scheduler
     from app.services.scheduler import start_scheduler
@@ -66,9 +159,27 @@ app = FastAPI(
 )
 
 # CORS middleware
+# SECURITY: Explicit allowed origins instead of wildcard when using credentials
+ALLOWED_ORIGINS = [
+    "https://bidking.ai",
+    "https://www.bidking.ai",
+    "https://bidking-web.fly.dev",
+]
+# Add localhost for development
+if settings.debug:
+    ALLOWED_ORIGINS.extend([
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+    ])
+# Allow custom origins from settings (comma-separated)
+if settings.cors_origins:
+    ALLOWED_ORIGINS.extend(settings.cors_origins.split(","))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins.split(",") if settings.cors_origins else ["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -87,6 +198,34 @@ async def add_rate_limit_headers(request: Request, call_next):
         response.headers["X-RateLimit-Limit"] = str(info["limit"])
         response.headers["X-RateLimit-Remaining"] = str(info["remaining"])
         response.headers["X-RateLimit-Reset"] = str(info["reset_in"])
+
+    return response
+
+
+# Security headers middleware
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Add security headers to all responses."""
+    response = await call_next(request)
+
+    # Prevent MIME type sniffing
+    response.headers["X-Content-Type-Options"] = "nosniff"
+
+    # Prevent clickjacking
+    response.headers["X-Frame-Options"] = "DENY"
+
+    # XSS protection (legacy browsers)
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+
+    # Referrer policy - don't leak referrer on cross-origin
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+
+    # Content Security Policy for API responses
+    response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+
+    # Strict Transport Security (HSTS) - force HTTPS in production
+    if not settings.debug:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
     return response
 
@@ -140,7 +279,11 @@ async def health():
 
 # Manual sync endpoint for populating opportunities
 @app.post("/admin/sync-opportunities")
-async def sync_opportunities_manual(days_back: int = 30, fetch_details: bool = True):
+async def sync_opportunities_manual(
+    days_back: int = 30,
+    fetch_details: bool = True,
+    admin: User = Depends(get_admin_user),
+):
     """
     Manually trigger SAM.gov opportunity sync.
 
@@ -427,7 +570,10 @@ def _parse_datetime_manual(dt_str):
 
 # Manual USAspending sync endpoint for populating market intelligence data
 @app.post("/admin/sync-usaspending")
-async def sync_usaspending_manual(days_back: int = 90):
+async def sync_usaspending_manual(
+    days_back: int = 90,
+    admin: User = Depends(get_admin_user),
+):
     """
     Manually trigger USAspending.gov contract awards sync.
 
@@ -497,6 +643,7 @@ async def sync_usaspending_manual(days_back: int = 90):
                     "Place of Performance State",
                     "Place of Performance Zip",
                     "generated_internal_id",
+                    "Type of Set Aside",
                 ],
                 "page": 1,
                 "limit": 100,
@@ -507,9 +654,26 @@ async def sync_usaspending_manual(days_back: int = 90):
             naics_synced = 0
             naics_recompetes = 0
 
-            with httpx.Client(timeout=60.0) as client:
+            # Get proxy manager for rotation
+            from app.services.proxy_manager import get_proxy_manager
+            proxy_manager = get_proxy_manager()
+            proxy = proxy_manager.get_proxy() if proxy_manager.has_proxies() else None
+            proxy_url = proxy.url if proxy else None
+
+            if proxy_url:
+                logger.info(f"Using proxy: {proxy.host}:{proxy.port}")
+
+            with httpx.Client(timeout=60.0, proxy=proxy_url) as client:
                 while True:
                     response = client.post(url, json=payload)
+
+                    # Track proxy success/failure
+                    if proxy:
+                        if response.status_code == 200:
+                            proxy_manager.mark_success(proxy)
+                        else:
+                            proxy_manager.mark_failure(proxy)
+
                     response.raise_for_status()
                     data = response.json()
 
@@ -547,6 +711,7 @@ async def sync_usaspending_manual(days_back: int = 90):
                                     "pop_city": award.get("Place of Performance City"),
                                     "pop_state": award.get("Place of Performance State"),
                                     "pop_zip": award.get("Place of Performance Zip"),
+                                    "set_aside_type": award.get("Type of Set Aside"),
                                     "fetched_at": datetime.utcnow(),
                                 }
 
@@ -556,6 +721,7 @@ async def sync_usaspending_manual(days_back: int = 90):
                                     set_={
                                         "total_obligation": stmt.excluded.total_obligation,
                                         "period_of_performance_end": stmt.excluded.period_of_performance_end,
+                                        "set_aside_type": stmt.excluded.set_aside_type,
                                         "fetched_at": stmt.excluded.fetched_at,
                                     },
                                 )
@@ -636,9 +802,200 @@ async def sync_usaspending_manual(days_back: int = 90):
     }
 
 
+# Bulk import contract awards from local sync
+class BulkAward(BaseModel):
+    """Single contract award for bulk import."""
+    award_id: str
+    piid: Optional[str] = None
+    award_type: Optional[str] = None
+    total_obligation: Optional[float] = None
+    base_and_all_options_value: Optional[float] = None
+    award_date: Optional[str] = None
+    period_of_performance_start: Optional[str] = None
+    period_of_performance_end: Optional[str] = None
+    naics_code: Optional[str] = None
+    naics_description: Optional[str] = None
+    psc_code: Optional[str] = None
+    awarding_agency_name: Optional[str] = None
+    awarding_sub_agency_name: Optional[str] = None
+    recipient_uei: Optional[str] = None
+    recipient_name: Optional[str] = None
+    pop_city: Optional[str] = None
+    pop_state: Optional[str] = None
+    pop_zip: Optional[str] = None
+    set_aside_type: Optional[str] = None
+
+
+class BulkAwardsRequest(BaseModel):
+    """Request body for bulk awards import."""
+    awards: List[BulkAward]
+
+
+@app.post("/admin/bulk-import-awards")
+async def bulk_import_awards(
+    request: BulkAwardsRequest,
+    req: Request,
+    admin: Optional[User] = Depends(get_optional_admin_user),
+):
+    """
+    Bulk import contract awards from local USAspending sync.
+
+    This endpoint receives data from scripts/upload_awards_to_flyio.py
+    running on the local machine with proxy-enabled sync.
+
+    Authentication: Accepts either admin JWT token OR X-Sync-Secret header.
+    """
+    # Check for sync secret OR admin user authentication
+    sync_secret = req.headers.get("X-Sync-Secret")
+    if not admin and (not sync_secret or sync_secret != settings.sync_secret):
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    from decimal import Decimal
+    from app.database import SessionLocal
+    from app.models import ContractAward, RecompeteOpportunity, Recipient
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+    import uuid as uuid_lib
+
+    stats = {
+        "awards_received": len(request.awards),
+        "awards_created": 0,
+        "awards_updated": 0,
+        "recompetes_created": 0,
+        "recipients_updated": 0,
+        "errors": 0,
+    }
+
+    def parse_date(date_str):
+        if not date_str:
+            return None
+        try:
+            return datetime.strptime(date_str[:10], "%Y-%m-%d").date()
+        except:
+            return None
+
+    # Track recipients we've seen/added in this batch to avoid duplicates
+    seen_recipients = set()
+
+    with SessionLocal() as db:
+        for award_data in request.awards:
+            try:
+                award_id = award_data.award_id
+
+                # Check if exists
+                existing = db.query(ContractAward).filter(
+                    ContractAward.award_id == award_id
+                ).first()
+
+                award_fields = {
+                    "piid": award_data.piid,
+                    "award_type": award_data.award_type or "contract",
+                    "total_obligation": Decimal(str(award_data.total_obligation or 0)),
+                    "base_and_all_options_value": Decimal(str(award_data.base_and_all_options_value or 0)),
+                    "award_date": parse_date(award_data.award_date),
+                    "period_of_performance_start": parse_date(award_data.period_of_performance_start),
+                    "period_of_performance_end": parse_date(award_data.period_of_performance_end),
+                    "naics_code": award_data.naics_code,
+                    "naics_description": award_data.naics_description,
+                    "psc_code": award_data.psc_code,
+                    "awarding_agency_name": award_data.awarding_agency_name,
+                    "awarding_sub_agency_name": award_data.awarding_sub_agency_name,
+                    "recipient_uei": award_data.recipient_uei,
+                    "recipient_name": award_data.recipient_name,
+                    "pop_city": award_data.pop_city,
+                    "pop_state": award_data.pop_state,
+                    "pop_zip": award_data.pop_zip,
+                    "set_aside_type": award_data.set_aside_type,
+                    "fetched_at": datetime.utcnow(),
+                }
+
+                if existing:
+                    # Update existing award
+                    for key, value in award_fields.items():
+                        if value is not None:
+                            setattr(existing, key, value)
+                    existing.fetched_at = datetime.utcnow()
+                    stats["awards_updated"] += 1
+                else:
+                    # Insert new award
+                    new_award = ContractAward(
+                        id=uuid_lib.uuid4(),
+                        award_id=award_id,
+                        **award_fields,
+                    )
+                    db.add(new_award)
+                    stats["awards_created"] += 1
+
+                # Create/update recompete opportunity if contract expires within 365 days
+                end_date = parse_date(award_data.period_of_performance_end)
+                today = datetime.utcnow().date()
+                if end_date and today <= end_date <= (today + timedelta(days=365)):
+                    existing_recompete = db.query(RecompeteOpportunity).filter(
+                        RecompeteOpportunity.award_id == award_id
+                    ).first()
+
+                    if existing_recompete:
+                        existing_recompete.period_of_performance_end = end_date
+                        existing_recompete.total_value = Decimal(str(award_data.base_and_all_options_value or 0))
+                        existing_recompete.set_aside_type = award_data.set_aside_type
+                        existing_recompete.updated_at = datetime.utcnow()
+                    else:
+                        new_recompete = RecompeteOpportunity(
+                            id=uuid_lib.uuid4(),
+                            award_id=award_id,
+                            piid=award_data.piid,
+                            period_of_performance_end=end_date,
+                            naics_code=award_data.naics_code,
+                            total_value=Decimal(str(award_data.base_and_all_options_value or 0)),
+                            awarding_agency_name=award_data.awarding_agency_name,
+                            incumbent_name=award_data.recipient_name,
+                            incumbent_uei=award_data.recipient_uei,
+                            set_aside_type=award_data.set_aside_type,
+                            status="upcoming",
+                            created_at=datetime.utcnow(),
+                            updated_at=datetime.utcnow(),
+                        )
+                        db.add(new_recompete)
+                        stats["recompetes_created"] += 1
+
+                # Update recipient info (with deduplication within batch)
+                if award_data.recipient_uei and award_data.recipient_uei not in seen_recipients:
+                    seen_recipients.add(award_data.recipient_uei)
+
+                    existing_recipient = db.query(Recipient).filter(
+                        Recipient.uei == award_data.recipient_uei
+                    ).first()
+
+                    if existing_recipient:
+                        existing_recipient.name = award_data.recipient_name
+                        existing_recipient.last_updated = datetime.utcnow()
+                    else:
+                        new_recipient = Recipient(
+                            id=uuid_lib.uuid4(),
+                            uei=award_data.recipient_uei,
+                            name=award_data.recipient_name,
+                            last_updated=datetime.utcnow(),
+                        )
+                        db.add(new_recipient)
+                    stats["recipients_updated"] += 1
+
+            except Exception as e:
+                stats["errors"] += 1
+                continue
+
+        db.commit()
+
+    return {
+        "status": "success",
+        **stats,
+    }
+
+
 # Generate recompetes from existing awards in database
 @app.post("/admin/generate-recompetes")
-async def generate_recompetes_from_awards(days_ahead: int = 365):
+async def generate_recompetes_from_awards(
+    days_ahead: int = 365,
+    admin: User = Depends(get_admin_user),
+):
     """
     Scan existing contract awards and create recompete opportunities
     for any contracts expiring within the specified days.
@@ -719,7 +1076,9 @@ async def generate_recompetes_from_awards(days_ahead: int = 365):
 
 # Backfill recompete values from awards table
 @app.post("/api/v1/admin/recompetes/backfill-values")
-async def backfill_recompete_values():
+async def backfill_recompete_values(
+    admin: User = Depends(get_admin_user),
+):
     """
     Backfill total_value on recompetes from the linked award's base_and_all_options_value.
     Run this after initial sync to populate values.
@@ -761,8 +1120,55 @@ async def backfill_recompete_values():
     }
 
 
+@app.post("/api/v1/admin/opportunities/backfill-scores")
+async def backfill_opportunity_scores(
+    admin: User = Depends(get_admin_user),
+):
+    """
+    Recalculate likelihood_score for all opportunities using the scoring algorithm.
+    Run this after fixing the scoring logic.
+    """
+    from app.database import SessionLocal
+    from app.models import Opportunity
+    from app.services.scoring import calculate_likelihood_score
+
+    updated = 0
+    with SessionLocal() as db:
+        opportunities = db.query(Opportunity).filter(
+            Opportunity.status == "active"
+        ).all()
+
+        for opp in opportunities:
+            # Build the dict format expected by calculate_likelihood_score
+            opp_data = {
+                "title": opp.title,
+                "description": opp.description or "",
+                "type": opp.notice_type,
+                "typeOfSetAside": opp.set_aside_type,
+                "typeOfSetAsideDescription": opp.set_aside_description,
+                "naicsCode": opp.naics_code,
+                "departmentName": opp.department_name,
+            }
+            new_score = calculate_likelihood_score(opp_data)
+            if opp.likelihood_score != new_score:
+                opp.likelihood_score = new_score
+                updated += 1
+
+        db.commit()
+
+    return {
+        "status": "completed",
+        "opportunities_updated": updated,
+        "total_checked": len(opportunities),
+    }
+
+
 @app.post("/api/v1/admin/opportunities/ai-summarize")
-async def trigger_ai_summarization(limit: int = 50, force: bool = False):
+async def trigger_ai_summarization(
+    limit: int = 50,
+    force: bool = False,
+    admin: User = Depends(get_admin_user),
+):
     """
     Manually trigger AI summarization of PDF attachments.
 
@@ -916,10 +1322,18 @@ async def get_recompete_filter_options():
     """
     Get available filter options for recompetes.
     Returns unique agencies and NAICS codes currently in the database.
+
+    Cached for 30 minutes for performance.
     """
     from app.database import SessionLocal
     from app.models import RecompeteOpportunity
     from sqlalchemy import func, distinct
+    from app.utils.redis_client import filter_options_cache
+
+    # Try cache first
+    cached = filter_options_cache.get("recompete_filters")
+    if cached:
+        return cached
 
     today = datetime.utcnow().date()
     end_date = today + timedelta(days=365)
@@ -961,7 +1375,7 @@ async def get_recompete_filter_options():
             RecompeteOpportunity.total_value.isnot(None)
         ).first()
 
-    return {
+    result = {
         "agencies": [{"name": a[0], "count": a[1]} for a in agencies if a[0]],
         "naics_codes": [{"code": n[0], "count": n[1]} for n in naics_codes if n[0]],
         "value_range": {
@@ -970,6 +1384,10 @@ async def get_recompete_filter_options():
             "avg": float(value_stats[2]) if value_stats[2] else 0,
         }
     }
+
+    # Cache for 30 minutes
+    filter_options_cache.set("recompete_filters", result)
+    return result
 
 
 # Get single recompete with full details
@@ -1049,9 +1467,55 @@ async def get_recompete_detail(recompete_id: str):
     return result
 
 
+# Get incumbent vulnerability for a recompete
+@app.get("/api/v1/public/recompetes/{recompete_id}/incumbent-vulnerability")
+async def get_recompete_incumbent_vulnerability(recompete_id: str):
+    """
+    Get vulnerability analysis for the incumbent on a specific recompete.
+
+    Returns 0-100 vulnerability score (higher = more beatable):
+    - **concentration** (25%): Agency concentration risk
+    - **expertise** (20%): NAICS specialization
+    - **trajectory** (20%): Contract value trend
+    - **market_share** (20%): Market dominance
+    - **recompete_history** (15%): Track record of losing recompetes
+
+    Note: CPARS, protest history, and financial health data not available.
+    """
+    from uuid import UUID
+    from app.database import SessionLocal
+    from app.models import RecompeteOpportunity
+    from app.services.incumbent_analysis import get_vulnerability_for_recompete
+
+    with SessionLocal() as db:
+        # Get recompete
+        recompete = db.query(RecompeteOpportunity).filter(
+            RecompeteOpportunity.id == UUID(recompete_id)
+        ).first()
+
+        if not recompete:
+            return {"error": "Recompete not found"}, 404
+
+        if not recompete.incumbent_uei:
+            return {
+                "error": "No incumbent UEI available for this recompete",
+                "incumbent_name": recompete.incumbent_name,
+                "recommendation": "Cannot calculate vulnerability without UEI. Try searching by company name.",
+            }
+
+        result = get_vulnerability_for_recompete(
+            db=db,
+            recompete_id=str(recompete.id),
+        )
+
+        return result
+
+
 # Scheduler status and control endpoints
 @app.get("/admin/scheduler/status")
-async def get_scheduler_status():
+async def get_scheduler_status_endpoint(
+    admin: User = Depends(get_admin_user),
+):
     """Get current scheduler status and job information."""
     from app.services.scheduler import get_scheduler_status
     return get_scheduler_status()
@@ -1062,6 +1526,7 @@ async def run_scheduler_job(
     job_name: str,
     naics_code: str = "541511",
     max_results: int = 100,
+    admin: User = Depends(get_admin_user),
 ):
     """
     Manually trigger a specific scheduler job.
@@ -1074,6 +1539,7 @@ async def run_scheduler_job(
     - backfill_attachments: Backfill attachments via SAM.gov internal API
     - extract_pdf: Extract text from PDF attachments
     - ai_summarize: AI analyze PDF attachments
+    - send_reminders: Send pipeline reminder emails (deadline warnings + custom reminders)
 
     For 'scraper' job:
     - naics_code: NAICS code to sync (default: 541511 Custom Programming)
@@ -1090,6 +1556,7 @@ async def run_scheduler_job(
         extract_pdf_text_job,
         ai_summarization_job,
         scraper_sync_job,
+        send_pipeline_reminders_job,
     )
 
     jobs = {
@@ -1100,6 +1567,7 @@ async def run_scheduler_job(
         "backfill_attachments": backfill_attachments_job,
         "extract_pdf": extract_pdf_text_job,
         "ai_summarize": ai_summarization_job,
+        "send_reminders": send_pipeline_reminders_job,
     }
 
     if job_name not in jobs:
@@ -1127,7 +1595,9 @@ async def run_scheduler_job(
 
 
 @app.post("/admin/reset-failed-attachments")
-async def reset_failed_attachments():
+async def reset_failed_attachments(
+    admin: User = Depends(get_admin_user),
+):
     """
     Reset failed attachment extractions to 'pending' so they can be re-processed.
 
@@ -1162,7 +1632,9 @@ async def reset_failed_attachments():
 
 
 @app.post("/admin/reset-failed-ai-summaries")
-async def reset_failed_ai_summaries():
+async def reset_failed_ai_summaries(
+    admin: User = Depends(get_admin_user),
+):
     """
     Reset failed AI summarizations to 'pending' so they can be re-processed.
 
@@ -1197,7 +1669,9 @@ async def reset_failed_ai_summaries():
 
 
 @app.post("/admin/migrate-opportunity-schema")
-async def migrate_opportunity_schema():
+async def migrate_opportunity_schema(
+    admin: User = Depends(get_admin_user),
+):
     """
     Add new columns to opportunities table for SAM.gov detail enhancements.
 
@@ -1223,6 +1697,11 @@ async def migrate_opportunity_schema():
         ("initiative", "VARCHAR(255)"),
         ("task_delivery_order_number", "VARCHAR(100)"),
         ("modification_number", "VARCHAR(50)"),
+        # Amendment tracking columns
+        ("previous_response_deadline", "TIMESTAMP"),
+        ("amendment_count", "INTEGER DEFAULT 0"),
+        ("last_amendment_date", "TIMESTAMP"),
+        ("amendment_history", "TEXT"),  # JSON stored as TEXT for SQLite
     ]
 
     # Create opportunity_attachments table
@@ -1293,6 +1772,225 @@ async def migrate_opportunity_schema():
         "status": "completed",
         "migrations_applied": migrations_applied,
         "errors": errors,
+    }
+
+
+# =============================================================================
+# Bulk Import from Local Scraper
+# =============================================================================
+
+class BulkOpportunity(BaseModel):
+    """Single opportunity for bulk import."""
+    notice_id: str
+    solicitation_number: Optional[str] = None
+    title: str
+    description: Optional[str] = None
+    notice_type: Optional[str] = None
+    posted_date: Optional[str] = None
+    response_deadline: Optional[str] = None
+    department_name: Optional[str] = None
+    agency_name: Optional[str] = None
+    sub_tier: Optional[str] = None
+    office_name: Optional[str] = None
+    naics_code: Optional[str] = None
+    psc_code: Optional[str] = None
+    set_aside_type: Optional[str] = None
+    set_aside_description: Optional[str] = None
+    pop_city: Optional[str] = None
+    pop_state: Optional[str] = None
+    pop_country: Optional[str] = None
+    award_amount: Optional[float] = None
+    awardee_name: Optional[str] = None
+    awardee_uei: Optional[str] = None
+    ui_link: Optional[str] = None
+    status: Optional[str] = "active"
+    likelihood_score: Optional[int] = 50
+    ai_estimated_value_low: Optional[float] = None
+    ai_estimated_value_high: Optional[float] = None
+    ai_estimated_value_basis: Optional[str] = None
+    ai_summary: Optional[dict] = None
+    attachments: Optional[List[dict]] = None
+    contacts: Optional[List[dict]] = None
+
+
+class BulkImportRequest(BaseModel):
+    """Request body for bulk import."""
+    opportunities: List[BulkOpportunity]
+
+
+@app.post("/api/v1/admin/bulk-import")
+async def bulk_import_opportunities(
+    request: BulkImportRequest,
+    req: Request,
+    admin: Optional[User] = Depends(get_optional_admin_user),
+):
+    """
+    Bulk import opportunities from local scraper.
+
+    This endpoint receives data from the daily_sync_to_flyio.py script
+    running on the local machine with the proxy-enabled scraper.
+
+    Authentication: Accepts either admin JWT token OR X-Sync-Secret header.
+
+    Benefits:
+    - Scraping runs locally with 215K residential proxies (free)
+    - AI analysis runs locally with GPU (free)
+    - Fly.io stays lightweight (just serves API)
+    """
+    # Check for sync secret OR admin user authentication
+    sync_secret = req.headers.get("X-Sync-Secret")
+    if not admin and (not sync_secret or sync_secret != settings.sync_secret):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    from app.database import SessionLocal
+    from app.models import Opportunity, PointOfContact, OpportunityAttachment
+    import uuid as uuid_lib
+
+    stats = {
+        "opportunities_received": len(request.opportunities),
+        "opportunities_created": 0,
+        "opportunities_updated": 0,
+        "contacts_created": 0,
+        "attachments_created": 0,
+        "errors": 0,
+    }
+
+    with SessionLocal() as db:
+        for opp_data in request.opportunities:
+            try:
+                notice_id = opp_data.notice_id
+
+                # Check if exists
+                existing = db.query(Opportunity).filter(
+                    Opportunity.notice_id == notice_id
+                ).first()
+
+                # Parse dates
+                posted_date = None
+                response_deadline = None
+                if opp_data.posted_date:
+                    try:
+                        posted_date = datetime.fromisoformat(opp_data.posted_date.replace("Z", "+00:00").split("+")[0])
+                    except:
+                        pass
+                if opp_data.response_deadline:
+                    try:
+                        response_deadline = datetime.fromisoformat(opp_data.response_deadline.replace("Z", "+00:00").split("+")[0])
+                    except:
+                        pass
+
+                opp_fields = {
+                    "solicitation_number": opp_data.solicitation_number,
+                    "title": (opp_data.title or "")[:500],
+                    "description": opp_data.description,
+                    "notice_type": opp_data.notice_type,
+                    "posted_date": posted_date,
+                    "response_deadline": response_deadline,
+                    "department_name": opp_data.department_name,
+                    "agency_name": opp_data.agency_name,
+                    "sub_tier": opp_data.sub_tier,
+                    "office_name": opp_data.office_name,
+                    "naics_code": opp_data.naics_code,
+                    "psc_code": opp_data.psc_code,
+                    "set_aside_type": opp_data.set_aside_type,
+                    "set_aside_description": opp_data.set_aside_description,
+                    "pop_city": opp_data.pop_city,
+                    "pop_state": opp_data.pop_state,
+                    "pop_country": opp_data.pop_country or "USA",
+                    "award_amount": opp_data.award_amount,
+                    "awardee_name": opp_data.awardee_name,
+                    "awardee_uei": opp_data.awardee_uei,
+                    "ui_link": opp_data.ui_link,
+                    "status": opp_data.status or "active",
+                    "likelihood_score": opp_data.likelihood_score or 50,
+                    "ai_estimated_value_low": opp_data.ai_estimated_value_low,
+                    "ai_estimated_value_high": opp_data.ai_estimated_value_high,
+                    "ai_estimated_value_basis": opp_data.ai_estimated_value_basis,
+                    "fetched_at": datetime.utcnow(),
+                }
+
+                if existing:
+                    for key, value in opp_fields.items():
+                        if value is not None:
+                            setattr(existing, key, value)
+                    existing.updated_at = datetime.utcnow()
+                    db_opp = existing
+                    stats["opportunities_updated"] += 1
+                else:
+                    db_opp = Opportunity(
+                        id=uuid_lib.uuid4(),
+                        notice_id=notice_id,
+                        **opp_fields
+                    )
+                    db.add(db_opp)
+                    db.flush()
+                    stats["opportunities_created"] += 1
+
+                # Import contacts
+                if opp_data.contacts:
+                    for contact in opp_data.contacts:
+                        if contact.get('name') or contact.get('email'):
+                            # Check if exists
+                            existing_poc = db.query(PointOfContact).filter(
+                                PointOfContact.opportunity_id == db_opp.id,
+                                PointOfContact.email == contact.get('email')
+                            ).first()
+
+                            if not existing_poc:
+                                poc = PointOfContact(
+                                    id=uuid_lib.uuid4(),
+                                    opportunity_id=db_opp.id,
+                                    contact_type=contact.get('type', 'primary'),
+                                    name=contact.get('name'),
+                                    title=contact.get('title'),
+                                    email=contact.get('email'),
+                                    phone=contact.get('phone'),
+                                )
+                                db.add(poc)
+                                stats["contacts_created"] += 1
+
+                # Import attachments
+                if opp_data.attachments:
+                    for att in opp_data.attachments:
+                        download_url = att.get('url')
+                        if not download_url:
+                            continue
+
+                        existing_att = db.query(OpportunityAttachment).filter(
+                            OpportunityAttachment.opportunity_id == db_opp.id,
+                            OpportunityAttachment.url == download_url
+                        ).first()
+
+                        if not existing_att:
+                            new_att = OpportunityAttachment(
+                                id=uuid_lib.uuid4(),
+                                opportunity_id=db_opp.id,
+                                name=att.get('name'),
+                                url=download_url,
+                                resource_type='file',
+                                file_type=att.get('file_type'),
+                                file_size=att.get('file_size'),
+                                text_content=att.get('text_content'),
+                                extraction_status='extracted' if att.get('text_content') else 'pending',
+                            )
+
+                            # Add AI summary if provided
+                            if opp_data.ai_summary:
+                                new_att.ai_summary = opp_data.ai_summary
+                                new_att.ai_summary_status = 'summarized'
+                                new_att.ai_summarized_at = datetime.utcnow()
+
+                            db.add(new_att)
+                            stats["attachments_created"] += 1
+
+            except Exception as e:
+                stats["errors"] += 1
+                logger.warning(f"Error importing {opp_data.notice_id}: {e}")
+
+        db.commit()
+
+    return {
+        "status": "success",
+        "stats": stats,
     }
 
 

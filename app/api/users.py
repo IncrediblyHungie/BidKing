@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_current_user
 from app.models import User
-from app.schemas.user import UserUpdate, UserResponse
+from app.schemas.user import UserUpdate, UserResponse, UserNotificationSettings
 from app.utils.security import get_password_hash
 
 router = APIRouter()
@@ -83,3 +83,36 @@ async def delete_account(
     db.commit()
 
     return {"message": "Account deleted successfully"}
+
+
+@router.get("/me/notification-settings", response_model=UserNotificationSettings)
+async def get_notification_settings(
+    current_user: User = Depends(get_current_user),
+):
+    """Get current user's notification settings."""
+    return UserNotificationSettings(
+        email_reminders_enabled=current_user.email_reminders_enabled,
+        email_deadline_warnings=current_user.email_deadline_warnings,
+        deadline_warning_days=current_user.deadline_warning_days,
+    )
+
+
+@router.patch("/me/notification-settings", response_model=UserNotificationSettings)
+async def update_notification_settings(
+    settings: UserNotificationSettings,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update current user's notification settings."""
+    current_user.email_reminders_enabled = settings.email_reminders_enabled
+    current_user.email_deadline_warnings = settings.email_deadline_warnings
+    current_user.deadline_warning_days = settings.deadline_warning_days
+
+    db.commit()
+    db.refresh(current_user)
+
+    return UserNotificationSettings(
+        email_reminders_enabled=current_user.email_reminders_enabled,
+        email_deadline_warnings=current_user.email_deadline_warnings,
+        deadline_warning_days=current_user.deadline_warning_days,
+    )
