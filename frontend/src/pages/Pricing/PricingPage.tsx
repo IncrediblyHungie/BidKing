@@ -19,54 +19,15 @@ interface Plan {
   cta: string;
 }
 
+// BETA MODE: Everything free with pro features
 const plans: Plan[] = [
   {
     id: "free",
-    name: "Free",
-    description: "Get started with federal contract tracking",
+    name: "Beta Access",
+    description: "Full access during beta - all pro features included",
     priceMonthly: 0,
     priceYearly: 0,
-    cta: "Get Started",
-    features: [
-      { name: "1 alert profile", included: true },
-      { name: "10 alerts per month", included: true },
-      { name: "3 AI generations per day", included: true },
-      { name: "Daily digest emails", included: true },
-      { name: "Basic opportunity search", included: true },
-      { name: "Instant alerts", included: false },
-      { name: "CSV export", included: false },
-      { name: "Labor pricing data", included: false },
-      { name: "Recompete tracking", included: false },
-      { name: "API access", included: false },
-    ],
-  },
-  {
-    id: "starter",
-    name: "Starter",
-    description: "For growing contractors seeking more opportunities",
-    priceMonthly: 29,
-    priceYearly: 290,
-    cta: "Subscribe",
-    features: [
-      { name: "5 alert profiles", included: true },
-      { name: "100 alerts per month", included: true },
-      { name: "20 AI generations per day", included: true },
-      { name: "Daily & weekly digests", included: true },
-      { name: "Full opportunity search", included: true },
-      { name: "Instant alerts", included: true },
-      { name: "CSV export", included: true },
-      { name: "Labor pricing data", included: true },
-      { name: "Recompete tracking", included: false },
-      { name: "API access", included: false },
-    ],
-  },
-  {
-    id: "pro",
-    name: "Pro",
-    description: "For serious contractors who want every advantage",
-    priceMonthly: 79,
-    priceYearly: 790,
-    cta: "Subscribe",
+    cta: "Get Started Free",
     highlighted: true,
     features: [
       { name: "20 alert profiles", included: true },
@@ -75,7 +36,7 @@ const plans: Plan[] = [
       { name: "All digest options", included: true },
       { name: "Full opportunity search", included: true },
       { name: "Instant alerts", included: true },
-      { name: "CSV export", included: true },
+      { name: "CSV export (100/month)", included: true },
       { name: "Labor pricing data", included: true },
       { name: "Recompete tracking", included: true },
       { name: "API access", included: true },
@@ -181,45 +142,20 @@ export default function PricingPage() {
       <main className="max-w-7xl mx-auto px-4 py-12 sm:px-6 lg:px-8">
         {/* Title */}
         <div className="text-center mb-12">
+          <div className="inline-flex items-center gap-2 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 px-4 py-2 rounded-full text-sm font-medium mb-4">
+            <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+            Beta - Everything Free
+          </div>
           <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">
-            Simple, Transparent Pricing
+            Free During Beta
           </h1>
           <p className="text-xl text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
-            Choose the plan that fits your federal contracting needs. All plans include access to SAM.gov opportunities.
+            Get full pro access while we're in beta. Help us improve and lock in early adopter benefits.
           </p>
         </div>
 
-        {/* Billing Toggle */}
-        <div className="flex justify-center mb-12">
-          <div className="bg-gray-100 dark:bg-gray-800 rounded-xl p-1 flex">
-            <button
-              onClick={() => setBillingPeriod("monthly")}
-              className={`px-6 py-2 rounded-lg text-sm font-medium transition-all ${
-                billingPeriod === "monthly"
-                  ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
-                  : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-              }`}
-            >
-              Monthly
-            </button>
-            <button
-              onClick={() => setBillingPeriod("yearly")}
-              className={`px-6 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
-                billingPeriod === "yearly"
-                  ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm"
-                  : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-              }`}
-            >
-              Yearly
-              <span className="bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 text-xs px-2 py-0.5 rounded-full">
-                Save 2 months
-              </span>
-            </button>
-          </div>
-        </div>
-
         {/* Plan Cards */}
-        <div className="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto">
+        <div className="grid md:grid-cols-1 gap-8 max-w-md mx-auto">
           {plans.map((plan) => {
             const isCurrentPlan = isAuthenticated && currentTier === plan.id;
             const savings = getSavings(plan);
