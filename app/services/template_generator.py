@@ -194,7 +194,7 @@ Generate the section content now:"""
         logger.info(f"Generating proposal section: {section_heading}")
 
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-3-5-haiku-20241022",  # Cheaper model for proposals
             max_tokens=max_tokens,
             system=system_prompt,
             messages=[
@@ -221,7 +221,7 @@ Generate the section content now:"""
         return {
             "content": response_text,
             "status": "success",
-            "model": "claude-sonnet-4-20250514",
+            "model": "claude-3-5-haiku-20241022",
             "tokens_input": message.usage.input_tokens,
             "tokens_output": message.usage.output_tokens,
             "generated_at": datetime.utcnow().isoformat(),
@@ -505,7 +505,7 @@ Generate the compliance matrix now:"""
         logger.info("Generating compliance matrix")
 
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-3-5-haiku-20241022",  # Cheaper model for proposals
             max_tokens=max_tokens,
             system=COMPLIANCE_MATRIX_SYSTEM_PROMPT,
             messages=[
@@ -552,7 +552,7 @@ Generate the compliance matrix now:"""
         return {
             "matrix": matrix_data,
             "status": "success",
-            "model": "claude-sonnet-4-20250514",
+            "model": "claude-3-5-haiku-20241022",
             "tokens_input": message.usage.input_tokens,
             "tokens_output": message.usage.output_tokens,
             "generated_at": datetime.utcnow().isoformat(),

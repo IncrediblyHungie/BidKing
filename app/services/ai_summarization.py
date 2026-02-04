@@ -106,10 +106,10 @@ def summarize_pdf_content(
         # Build the prompt
         prompt = EXTRACTION_PROMPT.format(document_text=text_content)
 
-        # Call Claude API with Sonnet for high-quality extraction
-        logger.info(f"Calling Claude API (Sonnet) for {attachment_name}...")
+        # Call Claude API with Haiku for cost-effective extraction
+        logger.info(f"Calling Claude API (Haiku) for {attachment_name}...")
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-3-5-haiku-20241022",
             max_tokens=4096,
             messages=[
                 {
@@ -161,7 +161,7 @@ def summarize_pdf_content(
         try:
             summary_data = json.loads(json_text)
             summary_data["status"] = "summarized"
-            summary_data["model"] = "claude-sonnet-4-20250514"
+            summary_data["model"] = "claude-3-5-haiku-20241022"
             summary_data["analyzed_at"] = datetime.utcnow().isoformat()
             summary_data["tokens_used"] = total_tokens
             return summary_data

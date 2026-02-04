@@ -121,7 +121,7 @@ def analyze_capability_statement(
         # Call Claude API
         logger.info(f"Calling Claude API for capability statement: {file_name}...")
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-3-5-haiku-20241022",  # Cost-effective model
             max_tokens=4096,
             messages=[
                 {
@@ -168,7 +168,7 @@ def analyze_capability_statement(
         try:
             analysis_data = json.loads(json_text)
             analysis_data["status"] = "analyzed"
-            analysis_data["model"] = "claude-sonnet-4-20250514"
+            analysis_data["model"] = "claude-3-5-haiku-20241022"
             analysis_data["analyzed_at"] = datetime.utcnow().isoformat()
             return analysis_data
         except json.JSONDecodeError as e:
