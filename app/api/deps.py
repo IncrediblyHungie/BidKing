@@ -555,28 +555,33 @@ def track_ai_token_usage(db: Session, user_id: UUID, tokens_used: int):
     """
     Track AI token usage in the database.
     Call this after successful AI generation to update monthly totals.
+    Non-blocking - errors are logged but don't fail the request.
     """
-    from app.models.subscription import UsageTracking
+    try:
+        from app.models.subscription import UsageTracking
 
-    month_start = datetime(date.today().year, date.today().month, 1)
+        month_start = datetime(date.today().year, date.today().month, 1)
 
-    usage = db.query(UsageTracking).filter(
-        UsageTracking.user_id == user_id,
-        UsageTracking.period_start == month_start,
-    ).first()
+        usage = db.query(UsageTracking).filter(
+            UsageTracking.user_id == user_id,
+            UsageTracking.period_start == month_start,
+        ).first()
 
-    if not usage:
-        usage = UsageTracking(
-            user_id=user_id,
-            period_start=month_start,
-            ai_generations=1,
-            ai_tokens_used=tokens_used,
-        )
-        db.add(usage)
-    else:
-        if hasattr(usage, 'ai_generations'):
-            usage.ai_generations = (usage.ai_generations or 0) + 1
-        if hasattr(usage, 'ai_tokens_used'):
-            usage.ai_tokens_used = (usage.ai_tokens_used or 0) + tokens_used
+        if not usage:
+            usage = UsageTracking(
+                user_id=user_id,
+                period_start=month_start,
+                ai_generations=1,
+                ai_tokens_used=tokens_used,
+            )
+            db.add(usage)
+        else:
+            if hasattr(usage, 'ai_generations'):
+                usage.ai_generations = (usage.ai_generations or 0) + 1
+            if hasattr(usage, 'ai_tokens_used'):
+                usage.ai_tokens_used = (usage.ai_tokens_used or 0) + tokens_used
 
-    db.commit()
+        db.commit()
+    except Exception as e:
+        logger.warning(f"Failed to track AI token usage: {e}")
+        db.rollback()
