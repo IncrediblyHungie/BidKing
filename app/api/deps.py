@@ -510,7 +510,7 @@ class AIRateLimitDependency:
         month_start = datetime(date.today().year, date.today().month, 1)
         usage = db.query(UsageTracking).filter(
             UsageTracking.user_id == current_user.id,
-            UsageTracking.month == month_start,
+            UsageTracking.period_start == month_start,
         ).first()
 
         tokens_used = usage.ai_tokens_used if usage and hasattr(usage, 'ai_tokens_used') else 0
@@ -562,13 +562,13 @@ def track_ai_token_usage(db: Session, user_id: UUID, tokens_used: int):
 
     usage = db.query(UsageTracking).filter(
         UsageTracking.user_id == user_id,
-        UsageTracking.month == month_start,
+        UsageTracking.period_start == month_start,
     ).first()
 
     if not usage:
         usage = UsageTracking(
             user_id=user_id,
-            month=month_start,
+            period_start=month_start,
             ai_generations=1,
             ai_tokens_used=tokens_used,
         )
