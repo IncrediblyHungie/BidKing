@@ -63,10 +63,11 @@ def _sanitize_fts_query(query: str) -> str:
 def _fts_search_ids(db: Session, query: str) -> list:
     """Run FTS5 MATCH and return matching opportunity IDs."""
     sanitized = _sanitize_fts_query(query)
-    if not sanitized.strip():
-        return None  # No valid search terms, skip FTS
+    stripped = sanitized.strip().strip('"')
+    if not stripped or len(stripped) < 3:
+        return None  # Too short for FTS, caller should fall back to ilike
     result = db.execute(
-        text("SELECT opportunity_id FROM opportunities_fts WHERE opportunities_fts MATCH :q"),
+        text("SELECT opportunity_id FROM opportunities_fts WHERE opportunities_fts MATCH :q LIMIT 5000"),
         {"q": sanitized}
     )
     return [row[0] for row in result.fetchall()]
@@ -134,19 +135,17 @@ async def list_opportunities(
 
     # Text search - FTS5 for SQLite, ilike fallback for PostgreSQL
     if query:
+        used_fts = False
         if _USE_FTS:
             matching_ids = _fts_search_ids(db, query)
             if matching_ids is not None:
                 base_query = base_query.filter(Opportunity.id.in_(matching_ids))
-        else:
-            attachment_subquery = db.query(OpportunityAttachment.opportunity_id).filter(
-                OpportunityAttachment.text_content.ilike(f"%{query}%")
-            ).subquery()
+                used_fts = True
+        if not used_fts:
             search_filter = or_(
                 Opportunity.title.ilike(f"%{query}%"),
                 Opportunity.description.ilike(f"%{query}%"),
                 Opportunity.solicitation_number.ilike(f"%{query}%"),
-                Opportunity.id.in_(attachment_subquery),
             )
             base_query = base_query.filter(search_filter)
 
@@ -476,11 +475,13 @@ async def export_opportunities_csv(
 
     # Text search - FTS5 for SQLite, ilike fallback for PostgreSQL
     if query:
+        used_fts = False
         if _USE_FTS:
             matching_ids = _fts_search_ids(db, query)
             if matching_ids is not None:
                 base_query = base_query.filter(Opportunity.id.in_(matching_ids))
-        else:
+                used_fts = True
+        if not used_fts:
             search_filter = or_(
                 Opportunity.title.ilike(f"%{query}%"),
                 Opportunity.description.ilike(f"%{query}%"),

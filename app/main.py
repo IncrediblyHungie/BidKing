@@ -156,28 +156,33 @@ async def lifespan(app: FastAPI):
 
                 row = conn.execute(text("SELECT COUNT(*) FROM opportunities_fts")).fetchone()
                 if row[0] == 0:
-                    print("  Populating FTS index from existing data (batched)...")
-                    total_count = conn.execute(text(
-                        "SELECT COUNT(*) FROM opportunities WHERE status = 'active'"
-                    )).fetchone()[0]
-                    batch_size = 500
-                    inserted = 0
-                    for offset in range(0, total_count + 1, batch_size):
-                        conn.execute(text(f"""
-                            INSERT INTO opportunities_fts (opportunity_id, title, description, solicitation_number, attachment_text)
-                            SELECT o.id, COALESCE(o.title, ''), COALESCE(SUBSTR(o.description, 1, 2000), ''),
-                                   COALESCE(o.solicitation_number, ''), COALESCE(GROUP_CONCAT(SUBSTR(a.text_content, 1, 1000), ' '), '')
-                            FROM opportunities o
-                            LEFT JOIN opportunity_attachments a ON a.opportunity_id = o.id
-                            WHERE o.status = 'active'
-                            GROUP BY o.id
-                            LIMIT {batch_size} OFFSET {offset}
-                        """))
-                        conn.commit()
-                        inserted += batch_size
-                        print(f"    FTS batch: {min(inserted, total_count)}/{total_count}")
-                    row = conn.execute(text("SELECT COUNT(*) FROM opportunities_fts")).fetchone()
-                    print(f"  FTS index populated with {row[0]} opportunities")
+                    # Populate in background thread so server starts immediately
+                    import threading
+                    def _populate_fts():
+                        try:
+                            with engine.connect() as bg_conn:
+                                total_count = bg_conn.execute(text(
+                                    "SELECT COUNT(*) FROM opportunities WHERE status = 'active'"
+                                )).fetchone()[0]
+                                print(f"  [FTS] Populating index with {total_count} opportunities in background...")
+                                batch_size = 500
+                                for offset in range(0, total_count + 1, batch_size):
+                                    bg_conn.execute(text(f"""
+                                        INSERT INTO opportunities_fts (opportunity_id, title, description, solicitation_number, attachment_text)
+                                        SELECT o.id, COALESCE(o.title, ''), COALESCE(SUBSTR(o.description, 1, 2000), ''),
+                                               COALESCE(o.solicitation_number, ''), COALESCE(GROUP_CONCAT(SUBSTR(a.text_content, 1, 1000), ' '), '')
+                                        FROM opportunities o
+                                        LEFT JOIN opportunity_attachments a ON a.opportunity_id = o.id
+                                        WHERE o.status = 'active'
+                                        GROUP BY o.id
+                                        LIMIT {batch_size} OFFSET {offset}
+                                    """))
+                                    bg_conn.commit()
+                                final = bg_conn.execute(text("SELECT COUNT(*) FROM opportunities_fts")).fetchone()
+                                print(f"  [FTS] Index populated with {final[0]} opportunities")
+                        except Exception as e:
+                            print(f"  [FTS] Background populate error: {e}")
+                    threading.Thread(target=_populate_fts, daemon=True).start()
                 else:
                     print(f"  FTS index already has {row[0]} entries")
         except Exception as e:
