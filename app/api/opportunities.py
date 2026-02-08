@@ -6,16 +6,18 @@ Handles searching, filtering, and viewing federal contract opportunities.
 
 import csv
 import io
-from typing import List, Optional
+import time
+from typing import List, Optional, Dict, Any
 from uuid import UUID
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import or_, and_, func
+from sqlalchemy import or_, and_, func, text
 
 from app.api.deps import get_db, get_current_user, get_optional_user, rate_limit_search, require_starter
+from app.config import settings
 from app.models import User, Opportunity, SavedOpportunity, PointOfContact, OpportunityAttachment, OpportunityHistory
 from app.models.company import OpportunityScore
 from app.schemas.opportunity import (
@@ -28,6 +30,47 @@ from app.schemas.opportunity import (
     VALID_PIPELINE_STATUSES,
 )
 from app.services.scoring import get_score_category, explain_score
+from app.services.scoring_service import calculate_all_scores_for_user
+
+# FTS5 special characters to strip from user input
+_FTS5_SPECIAL = set('*(){}[]^~:!"\'\\')
+_USE_FTS = 'sqlite' in settings.database_url
+
+
+def _sanitize_fts_query(query: str) -> str:
+    """Sanitize user input for FTS5 MATCH.
+
+    Multi-word input is treated as a phrase search (wrapped in quotes).
+    Single words are searched as-is. User-provided quotes are preserved.
+    """
+    import re
+    # If user already quoted something, preserve their intent
+    if '"' in query:
+        phrases = re.findall(r'"[^"]*"', query)
+        remaining = re.sub(r'"[^"]*"', '', query)
+        cleaned = ''.join(c for c in remaining if c not in _FTS5_SPECIAL)
+        words = cleaned.split()
+        parts = [w for w in words if w] + phrases
+        return ' '.join(parts)
+    # Strip special chars
+    cleaned = ''.join(c for c in query if c not in _FTS5_SPECIAL)
+    words = cleaned.split()
+    if len(words) > 1:
+        return '"' + ' '.join(words) + '"'
+    return words[0] if words else ''
+
+
+def _fts_search_ids(db: Session, query: str) -> list:
+    """Run FTS5 MATCH and return matching opportunity IDs."""
+    sanitized = _sanitize_fts_query(query)
+    if not sanitized.strip():
+        return None  # No valid search terms, skip FTS
+    result = db.execute(
+        text("SELECT opportunity_id FROM opportunities_fts WHERE opportunities_fts MATCH :q"),
+        {"q": sanitized}
+    )
+    return [row[0] for row in result.fetchall()]
+
 
 router = APIRouter()
 
@@ -89,20 +132,23 @@ async def list_opportunities(
             )
         )
 
-    # Text search - includes title, description, solicitation number, and attachment text
+    # Text search - FTS5 for SQLite, ilike fallback for PostgreSQL
     if query:
-        # Check if any attachments contain the search term
-        attachment_subquery = db.query(OpportunityAttachment.opportunity_id).filter(
-            OpportunityAttachment.text_content.ilike(f"%{query}%")
-        ).subquery()
-
-        search_filter = or_(
-            Opportunity.title.ilike(f"%{query}%"),
-            Opportunity.description.ilike(f"%{query}%"),
-            Opportunity.solicitation_number.ilike(f"%{query}%"),
-            Opportunity.id.in_(attachment_subquery),
-        )
-        base_query = base_query.filter(search_filter)
+        if _USE_FTS:
+            matching_ids = _fts_search_ids(db, query)
+            if matching_ids is not None:
+                base_query = base_query.filter(Opportunity.id.in_(matching_ids))
+        else:
+            attachment_subquery = db.query(OpportunityAttachment.opportunity_id).filter(
+                OpportunityAttachment.text_content.ilike(f"%{query}%")
+            ).subquery()
+            search_filter = or_(
+                Opportunity.title.ilike(f"%{query}%"),
+                Opportunity.description.ilike(f"%{query}%"),
+                Opportunity.solicitation_number.ilike(f"%{query}%"),
+                Opportunity.id.in_(attachment_subquery),
+            )
+            base_query = base_query.filter(search_filter)
 
     # NAICS filter
     if naics_codes:
@@ -237,6 +283,11 @@ async def list_opportunities(
     )
 
 
+# Simple in-memory cache for stats (5 minute TTL)
+_stats_cache: Dict[str, Any] = {"data": None, "expires": 0}
+STATS_CACHE_TTL = 300  # 5 minutes
+
+
 @router.get("/stats")
 async def get_opportunity_stats(
     db: Session = Depends(get_db),
@@ -247,11 +298,15 @@ async def get_opportunity_stats(
     Only counts opportunities with future deadlines (not expired).
 
     For authenticated users with company profiles, uses personalized scores.
-    For anonymous users, uses generic likelihood_score.
+    For anonymous users, uses generic likelihood_score (cached for 5 min).
     """
     from app.models.company import OpportunityScore
 
     now = datetime.utcnow()
+
+    # For anonymous users, return cached stats if available
+    if not current_user and _stats_cache["data"] and time.time() < _stats_cache["expires"]:
+        return _stats_cache["data"]
 
     # Base filter: active status AND (no deadline OR future deadline)
     active_filter = and_(
@@ -358,7 +413,7 @@ async def get_opportunity_stats(
         func.count(Opportunity.id).desc()
     ).limit(10).all()
 
-    return {
+    result = {
         "total_active": total_active,
         "new_today": new_today,
         "score_distribution": {
@@ -370,6 +425,13 @@ async def get_opportunity_stats(
         "top_naics": [{"code": n[0], "count": n[1]} for n in top_naics],
         "generated_at": datetime.utcnow().isoformat(),
     }
+
+    # Cache for anonymous users
+    if not current_user:
+        _stats_cache["data"] = result
+        _stats_cache["expires"] = time.time() + STATS_CACHE_TTL
+
+    return result
 
 
 @router.get("/export/csv")
@@ -412,14 +474,19 @@ async def export_opportunities_csv(
             )
         )
 
-    # Text search
+    # Text search - FTS5 for SQLite, ilike fallback for PostgreSQL
     if query:
-        search_filter = or_(
-            Opportunity.title.ilike(f"%{query}%"),
-            Opportunity.description.ilike(f"%{query}%"),
-            Opportunity.solicitation_number.ilike(f"%{query}%"),
-        )
-        base_query = base_query.filter(search_filter)
+        if _USE_FTS:
+            matching_ids = _fts_search_ids(db, query)
+            if matching_ids is not None:
+                base_query = base_query.filter(Opportunity.id.in_(matching_ids))
+        else:
+            search_filter = or_(
+                Opportunity.title.ilike(f"%{query}%"),
+                Opportunity.description.ilike(f"%{query}%"),
+                Opportunity.solicitation_number.ilike(f"%{query}%"),
+            )
+            base_query = base_query.filter(search_filter)
 
     # NAICS filter
     if naics_codes:
@@ -546,6 +613,19 @@ async def get_user_opportunity_scores(
 
     Returns scores for all scored opportunities, or filter by specific IDs.
     """
+    # Check if any scores are stale — if so, recalculate all before returning
+    stale_count = db.query(OpportunityScore).filter(
+        OpportunityScore.user_id == current_user.id,
+        OpportunityScore.is_stale == True,
+    ).count()
+
+    if stale_count > 0:
+        try:
+            print(f"[SCORING] Auto-recalculating {stale_count} stale scores for user {current_user.id}")
+            calculate_all_scores_for_user(db, str(current_user.id))
+        except Exception as e:
+            print(f"[SCORING] Auto-recalculation failed: {e}")
+
     query = db.query(OpportunityScore).filter(
         OpportunityScore.user_id == current_user.id
     )
@@ -579,6 +659,8 @@ async def get_user_opportunity_scores(
                 "contract_type_breakdown": score.strategic_breakdown,
                 "timeline_score": score.timeline_score,
                 "timeline_breakdown": score.timeline_breakdown,
+                "workforce_score": score.workforce_score,
+                "workforce_breakdown": score.workforce_breakdown,
                 "is_stale": score.is_stale,
                 "calculated_at": score.calculated_at.isoformat() if score.calculated_at else None,
             }
@@ -611,6 +693,15 @@ async def get_opportunity_score(
             "message": "No score calculated for this opportunity. Complete company setup to enable scoring.",
         }
 
+    # Auto-recalculate if stale
+    if score.is_stale:
+        try:
+            print(f"[SCORING] Auto-recalculating stale score for user {current_user.id}, opp {opportunity_id}")
+            calculate_all_scores_for_user(db, str(current_user.id))
+            db.refresh(score)
+        except Exception as e:
+            print(f"[SCORING] Auto-recalculation failed: {e}")
+
     return {
         "opportunity_id": str(opportunity_id),
         "has_score": True,
@@ -627,6 +718,8 @@ async def get_opportunity_score(
         "contract_type_breakdown": score.strategic_breakdown,
         "timeline_score": score.timeline_score,
         "timeline_breakdown": score.timeline_breakdown,
+        "workforce_score": score.workforce_score,
+        "workforce_breakdown": score.workforce_breakdown,
         "is_stale": score.is_stale,
         "stale_reason": score.stale_reason,
         "calculated_at": score.calculated_at.isoformat() if score.calculated_at else None,
@@ -1019,6 +1112,9 @@ async def update_saved_opportunity(
 
     if data.reminder_date is not None:
         saved.reminder_date = data.reminder_date
+
+    if data.proposal_draft is not None:
+        saved.proposal_draft = data.proposal_draft
 
     # Update stage_changed_at if status changed
     if saved.status != old_status:

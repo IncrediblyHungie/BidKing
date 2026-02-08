@@ -1,7 +1,7 @@
 # Fly.io deployment configuration for BidKing API
 
 app = "bidking-api"
-primary_region = "sjc"  # San Jose (closest to California)
+primary_region = "sjc"
 
 [build]
   dockerfile = "Dockerfile"
@@ -11,24 +11,12 @@ primary_region = "sjc"  # San Jose (closest to California)
   ENVIRONMENT = "production"
   REDIS_URL = "redis://default:AWSSAAIncDJhMjg5OTRlOGFlMjY0NmM0YmFlYjlkMjVkMjhlYmE5NHAyMjU3NDY@able-penguin-25746.upstash.io:6379"
 
-# =============================================================================
-# Process Groups: API server + Celery worker (on same machine for SQLite access)
-# =============================================================================
-# NOTE: Worker runs on same machine as app to share the SQLite database volume.
-# A start script runs both uvicorn and celery worker in the same container.
-[processes]
-  app = "/bin/sh -c 'celery -A worker.celery_app worker --loglevel=info --concurrency=2 -Q celery,default,sync,alerts,emails,maintenance & uvicorn app.main:app --host 0.0.0.0 --port 8000'"
-
-# =============================================================================
-# HTTP Service (for 'app' process only)
-# =============================================================================
 [http_service]
   internal_port = 8000
   force_https = true
-  auto_stop_machines = false
+  auto_stop_machines = "stop"
   auto_start_machines = true
   min_machines_running = 1
-  processes = ["app"]  # Only route HTTP to app process
 
   [http_service.concurrency]
     type = "connections"
@@ -37,7 +25,7 @@ primary_region = "sjc"  # San Jose (closest to California)
 
 [[http_service.checks]]
   interval = "10s"
-  grace_period = "30s"
+  grace_period = "60s"
   method = "get"
   path = "/health"
   timeout = "5s"
@@ -46,10 +34,6 @@ primary_region = "sjc"  # San Jose (closest to California)
   source = "bidking_data"
   destination = "/app/data"
 
-# =============================================================================
-# Resource allocation
-# Increased for Celery worker + AI summarization
-# =============================================================================
 [[vm]]
   cpu_kind = "shared"
   cpus = 2

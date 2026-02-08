@@ -43,7 +43,9 @@ async def lifespan(app: FastAPI):
         # Proposal Templates
         ProposalTemplate, GeneratedSection,
         # Saved Searches
-        SavedSearch
+        SavedSearch,
+        # Feedback
+        Feedback
     )
     print("Creating database tables...")
     Base.metadata.create_all(bind=engine)
@@ -135,6 +137,51 @@ async def lifespan(app: FastAPI):
         conn.commit()
 
     print("Auto-migrations complete!")
+
+    # Create FTS5 full-text search index (SQLite only)
+    if 'sqlite' in settings.database_url:
+        try:
+            print("Setting up FTS5 full-text search index...")
+            with engine.connect() as conn:
+                conn.execute(text("""
+                    CREATE VIRTUAL TABLE IF NOT EXISTS opportunities_fts USING fts5(
+                        opportunity_id UNINDEXED,
+                        title,
+                        description,
+                        solicitation_number,
+                        attachment_text
+                    )
+                """))
+                conn.commit()
+
+                row = conn.execute(text("SELECT COUNT(*) FROM opportunities_fts")).fetchone()
+                if row[0] == 0:
+                    print("  Populating FTS index from existing data (batched)...")
+                    total_count = conn.execute(text(
+                        "SELECT COUNT(*) FROM opportunities WHERE status = 'active'"
+                    )).fetchone()[0]
+                    batch_size = 500
+                    inserted = 0
+                    for offset in range(0, total_count + 1, batch_size):
+                        conn.execute(text(f"""
+                            INSERT INTO opportunities_fts (opportunity_id, title, description, solicitation_number, attachment_text)
+                            SELECT o.id, COALESCE(o.title, ''), COALESCE(SUBSTR(o.description, 1, 2000), ''),
+                                   COALESCE(o.solicitation_number, ''), COALESCE(GROUP_CONCAT(SUBSTR(a.text_content, 1, 1000), ' '), '')
+                            FROM opportunities o
+                            LEFT JOIN opportunity_attachments a ON a.opportunity_id = o.id
+                            WHERE o.status = 'active'
+                            GROUP BY o.id
+                            LIMIT {batch_size} OFFSET {offset}
+                        """))
+                        conn.commit()
+                        inserted += batch_size
+                        print(f"    FTS batch: {min(inserted, total_count)}/{total_count}")
+                    row = conn.execute(text("SELECT COUNT(*) FROM opportunities_fts")).fetchone()
+                    print(f"  FTS index populated with {row[0]} opportunities")
+                else:
+                    print(f"  FTS index already has {row[0]} entries")
+        except Exception as e:
+            print(f"  FTS5 setup error (non-fatal): {e}")
 
     # Start background scheduler
     from app.services.scheduler import start_scheduler
@@ -1781,6 +1828,35 @@ async def migrate_opportunity_schema(
 # Bulk Import from Local Scraper
 # =============================================================================
 
+
+def update_fts_index(engine, opportunity_ids: list):
+    """Update FTS5 index for given opportunity IDs after bulk import."""
+    if not opportunity_ids or 'sqlite' not in settings.database_url:
+        return
+    from sqlalchemy import text
+    try:
+        with engine.connect() as conn:
+            # Delete existing entries for these IDs
+            for oid in opportunity_ids:
+                conn.execute(text(
+                    "DELETE FROM opportunities_fts WHERE opportunity_id = :oid"
+                ), {"oid": str(oid)})
+            # Re-insert with current data
+            placeholders = ",".join(f"'{str(oid)}'" for oid in opportunity_ids)
+            conn.execute(text(f"""
+                INSERT INTO opportunities_fts (opportunity_id, title, description, solicitation_number, attachment_text)
+                SELECT o.id, COALESCE(o.title, ''), COALESCE(SUBSTR(o.description, 1, 2000), ''),
+                       COALESCE(o.solicitation_number, ''), COALESCE(GROUP_CONCAT(SUBSTR(a.text_content, 1, 1000), ' '), '')
+                FROM opportunities o
+                LEFT JOIN opportunity_attachments a ON a.opportunity_id = o.id
+                WHERE o.id IN ({placeholders}) AND o.status = 'active'
+                GROUP BY o.id
+            """))
+            conn.commit()
+    except Exception as e:
+        print(f"[FTS] Error updating FTS index: {e}")
+
+
 class BulkOpportunity(BaseModel):
     """Single opportunity for bulk import."""
     notice_id: str
@@ -1855,6 +1931,7 @@ async def bulk_import_opportunities(
         "attachments_created": 0,
         "errors": 0,
     }
+    imported_ids = []
 
     with SessionLocal() as db:
         for opp_data in request.opportunities:
@@ -1927,6 +2004,8 @@ async def bulk_import_opportunities(
                     db.flush()
                     stats["opportunities_created"] += 1
 
+                imported_ids.append(db_opp.id)
+
                 # Import contacts
                 if opp_data.contacts:
                     for contact in opp_data.contacts:
@@ -1990,10 +2069,94 @@ async def bulk_import_opportunities(
 
         db.commit()
 
+    # Update FTS5 search index for imported opportunities
+    from app.database import engine as db_engine
+    update_fts_index(db_engine, imported_ids)
+
     return {
         "status": "success",
         "stats": stats,
     }
+
+
+# =============================================================================
+# User Feedback
+# =============================================================================
+
+class FeedbackRequest(BaseModel):
+    """User feedback submission."""
+    source: Optional[str] = None  # What brought them here
+    challenge: Optional[str] = None  # Biggest challenge
+    suggestion: Optional[str] = None  # How to improve
+    page_url: Optional[str] = None  # Current page
+
+
+@app.post("/api/v1/feedback")
+async def submit_feedback(
+    request: Request,
+    feedback: FeedbackRequest,
+    user: Optional[User] = Depends(get_optional_admin_user),
+):
+    """
+    Submit user feedback.
+
+    Works for both authenticated and unauthenticated users.
+    """
+    from app.database import SessionLocal
+    from app.models import Feedback
+
+    user_agent = request.headers.get("User-Agent", "")[:500]
+
+    with SessionLocal() as db:
+        fb = Feedback(
+            user_id=user.id if user else None,
+            source=feedback.source[:100] if feedback.source else None,
+            challenge=feedback.challenge[:2000] if feedback.challenge else None,
+            suggestion=feedback.suggestion[:2000] if feedback.suggestion else None,
+            page_url=feedback.page_url[:500] if feedback.page_url else None,
+            user_agent=user_agent,
+        )
+        db.add(fb)
+        db.commit()
+
+    return {"status": "success", "message": "Thanks for your feedback!"}
+
+
+@app.get("/admin/feedback")
+async def list_feedback(
+    admin: User = Depends(get_admin_user),
+    limit: int = 50,
+    offset: int = 0,
+):
+    """
+    List all feedback submissions (admin only).
+    """
+    from app.database import SessionLocal
+    from app.models import Feedback
+
+    with SessionLocal() as db:
+        feedback_list = (
+            db.query(Feedback)
+            .order_by(Feedback.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+
+        return {
+            "feedback": [
+                {
+                    "id": f.id,
+                    "user_id": str(f.user_id) if f.user_id else None,
+                    "source": f.source,
+                    "challenge": f.challenge,
+                    "suggestion": f.suggestion,
+                    "page_url": f.page_url,
+                    "created_at": f.created_at.isoformat() if f.created_at else None,
+                }
+                for f in feedback_list
+            ]
+        }
 
 
 if __name__ == "__main__":
